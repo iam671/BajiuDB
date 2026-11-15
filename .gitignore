@@ -1,0 +1,8 @@
+/build/bin/
+/dist/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/wailsjs/
+*.syso
+*.test.exe
+/.local/
