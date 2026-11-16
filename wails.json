@@ -7,5 +7,5 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {"name": "Bajiu DB"},
-  "info": {"companyName": "Bajiu DB", "productName": "Bajiu DB", "productVersion": "0.1.0", "comments": "MySQL connection manager"}
+  "info": {"companyName": "Bajiu DB", "productName": "Bajiu DB", "productVersion": "0.0.1", "comments": "MySQL connection manager and object browser"}
 }

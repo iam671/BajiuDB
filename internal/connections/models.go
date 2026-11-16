@@ -8,34 +8,51 @@ import (
 )
 
 type Profile struct {
-	ID          string    `json:"id"`
-	Revision    int       `json:"revision"`
-	Name        string    `json:"name"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Username    string    `json:"username"`
-	Database    string    `json:"database"`
-	Environment string    `json:"environment"`
-	Notes       string    `json:"notes"`
-	TLSMode     string    `json:"tlsMode"`
-	CAPath      string    `json:"caPath"`
-	ServerName  string    `json:"serverName"`
-	Timeout     int       `json:"timeout"`
-	HasPassword bool      `json:"hasPassword"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID                string    `json:"id"`
+	Revision          int       `json:"revision"`
+	Name              string    `json:"name"`
+	GroupID           string    `json:"groupId,omitempty"`
+	Host              string    `json:"host"`
+	Port              int       `json:"port"`
+	Username          string    `json:"username"`
+	Database          string    `json:"database"`
+	Environment       string    `json:"environment"`
+	Notes             string    `json:"notes"`
+	TLSMode           string    `json:"tlsMode"`
+	CAPath            string    `json:"caPath"`
+	ServerName        string    `json:"serverName"`
+	Timeout           int       `json:"timeout"`
+	TunnelMode        string    `json:"tunnelMode,omitempty"`
+	SSHHost           string    `json:"sshHost,omitempty"`
+	SSHPort           int       `json:"sshPort,omitempty"`
+	SSHUsername       string    `json:"sshUsername,omitempty"`
+	SSHAuth           string    `json:"sshAuth,omitempty"`
+	SSHKeyPath        string    `json:"sshKeyPath,omitempty"`
+	SSHKnownHostsPath string    `json:"sshKnownHostsPath,omitempty"`
+	SSHFingerprint    string    `json:"sshFingerprint,omitempty"`
+	HTTPURL           string    `json:"httpUrl,omitempty"`
+	HasPassword       bool      `json:"hasPassword"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 type Input struct {
 	Profile
-	Password         string `json:"password"`
-	RememberPassword bool   `json:"rememberPassword"`
-	PasswordAction   string `json:"passwordAction"`
+	Password               string `json:"password"`
+	RememberPassword       bool   `json:"rememberPassword"`
+	PasswordAction         string `json:"passwordAction"`
+	SSHPassword            string `json:"sshPassword"`
+	SSHKeyPassphrase       string `json:"sshKeyPassphrase"`
+	HTTPToken              string `json:"httpToken"`
+	SSHPasswordAction      string `json:"sshPasswordAction"`
+	SSHKeyPassphraseAction string `json:"sshKeyPassphraseAction"`
+	HTTPTokenAction        string `json:"httpTokenAction"`
 }
 
 type Record struct {
 	Profile
-	SecretRef string `json:"secretRef,omitempty"`
+	SecretRef    string `json:"secretRef,omitempty"`
+	SecretFormat int    `json:"secretFormat,omitempty"`
 }
 
 type SessionInfo struct {
@@ -53,6 +70,25 @@ type TestResult struct {
 	Message       string `json:"message"`
 	ServerVersion string `json:"serverVersion"`
 	LatencyMS     int64  `json:"latencyMs"`
+}
+
+// Numeric metadata is transmitted as text so unsigned BIGINT values stay exact.
+type DatabaseObject struct {
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	Engine        string `json:"engine"`
+	Rows          string `json:"rows"`
+	DataLength    string `json:"dataLength"`
+	IndexLength   string `json:"indexLength"`
+	AutoIncrement string `json:"autoIncrement"`
+	Comment       string `json:"comment"`
+	CreatedAt     string `json:"createdAt"`
+	ModifiedAt    string `json:"modifiedAt"`
+}
+
+type ObjectList struct {
+	Objects   []DatabaseObject `json:"objects"`
+	Truncated bool             `json:"truncated"`
 }
 
 func normalize(in Input, requireName bool) (Input, error) {
@@ -94,6 +130,9 @@ func normalize(in Input, requireName bool) (Input, error) {
 	}
 	if len(in.Notes) > 2000 || len(in.Database) > 256 || len(in.Username) > 256 || len(in.Host) > 253 || len(in.Password) > 8192 {
 		return in, errors.New("连接配置内容过长")
+	}
+	if err := normalizeTunnel(&in); err != nil {
+		return in, err
 	}
 	return in, nil
 }

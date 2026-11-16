@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ type Service struct {
 	secrets  Secrets
 	dialer   Dialer
 	records  []Record
+	groups   []Group
 	sessions map[string]liveSession
 	epoch    map[string]uint64
 	ctx      context.Context
@@ -33,7 +35,11 @@ type Service struct {
 func New(repo Repository, secrets Secrets, dialer Dialer) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	r, err := repo.Load()
-	return &Service{repo: repo, secrets: secrets, dialer: dialer, records: r, sessions: map[string]liveSession{}, epoch: map[string]uint64{}, ctx: ctx, cancel: cancel, loadErr: err}
+	groups := []Group{}
+	if catalog, ok := repo.(groupRepository); ok && err == nil {
+		groups, err = catalog.LoadGroups()
+	}
+	return &Service{repo: repo, secrets: secrets, dialer: dialer, records: r, groups: groups, sessions: map[string]liveSession{}, epoch: map[string]uint64{}, ctx: ctx, cancel: cancel, loadErr: err}
 }
 
 func newID() (string, error) {
@@ -80,6 +86,9 @@ func (s *Service) Save(raw Input) (Profile, error) {
 		return Profile{}, s.loadErr
 	}
 	old := Record{}
+	if !s.hasGroup(in.GroupID) {
+		return Profile{}, errors.New("连接分组不存在，请重新选择分组")
+	}
 	index := -1
 	if in.ID != "" {
 		index = s.index(in.ID)
@@ -109,23 +118,40 @@ func (s *Service) Save(raw Input) (Profile, error) {
 	}
 	ref := old.SecretRef
 	createdRef := ""
+	format := old.SecretFormat
 	if !in.RememberPassword || in.PasswordAction == "forget" {
 		ref = ""
-	} else if in.PasswordAction == "replace" {
+		format = 0
+	} else if !allSecretsKept(in) {
+		values := secretValues{}
+		if needsOldSecrets(in) && old.SecretRef != "" {
+			values, err = s.readSecrets(old)
+			if err != nil {
+				return Profile{}, err
+			}
+		}
+		values = mergeSecrets(in, values)
+		raw := values.MySQL
+		format = 0
+		if values.SSHPassword != "" || values.SSHKeyPassphrase != "" || values.HTTPToken != "" {
+			encoded, _ := json.Marshal(values)
+			raw = string(encoded)
+			format = 1
+		}
 		ref = ""
-		if in.Password != "" {
+		if raw != "" {
 			createdRef, err = newID()
 			if err != nil {
 				return Profile{}, err
 			}
-			if err = s.secrets.Set(createdRef, in.Password); err != nil {
+			if err = s.secrets.Set(createdRef, raw); err != nil {
 				return Profile{}, errors.New("系统凭据库无法保存密码；可关闭“记住密码”后保存连接")
 			}
 			ref = createdRef
 		}
 	}
 	p.HasPassword = ref != ""
-	updated := Record{Profile: p, SecretRef: ref}
+	updated := Record{Profile: p, SecretRef: ref, SecretFormat: format}
 	next := append([]Record{}, s.records...)
 	if index < 0 {
 		next = append(next, updated)
@@ -182,40 +208,12 @@ func (s *Service) Delete(id string, revision int) error {
 	return nil
 }
 
-func (s *Service) password(in Input) (string, error) {
-	if in.PasswordAction == "replace" {
-		return in.Password, nil
-	}
-	if in.PasswordAction == "forget" || in.ID == "" {
-		return "", nil
-	}
-	s.mu.Lock()
-	i := s.index(in.ID)
-	if i < 0 {
-		s.mu.Unlock()
-		return "", errors.New("连接已被删除，请刷新列表")
-	}
-	r := s.records[i]
-	s.mu.Unlock()
-	if r.Revision != in.Revision {
-		return "", errors.New("连接配置已变化，请重新选择")
-	}
-	if r.SecretRef == "" {
-		return "", nil
-	}
-	password, err := s.secrets.Get(r.SecretRef)
-	if err != nil {
-		return "", errors.New("无法从系统凭据库读取密码，请重新输入密码")
-	}
-	return password, nil
-}
-
 func (s *Service) open(raw Input) (Database, SessionInfo, error) {
 	in, err := normalize(raw, false)
 	if err != nil {
 		return nil, SessionInfo{}, err
 	}
-	password, err := s.password(in)
+	in, password, err := s.resolveCredentials(in)
 	if err != nil {
 		return nil, SessionInfo{}, err
 	}

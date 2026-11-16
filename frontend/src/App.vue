@@ -1,146 +1,429 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Plus, Search, Database, Server, ChevronRight, ChevronDown, Plug, Unplug, Play, Pencil, Trash2, Copy, Save, X, Check, CheckCircle2, AlertCircle, ShieldCheck, FolderOpen, SlidersHorizontal, RefreshCw, KeyRound, Clock3, Cable, MoreHorizontal, LoaderCircle } from '@lucide/vue'
-import { api, defaults, fromProfile, errorText, isDesktop, type Profile, type SessionInfo, type TestResult } from './api'
+import { Plug, Unplug, Plus, Database, Table2, PanelsTopLeft, Braces, Users, Wrench, FileCode2, Archive, Workflow, Network, ChartNoAxesColumn, ChevronDown, ChevronRight, Folder, Search, X, RefreshCw, Pencil, Trash2, Copy, Info, List, LayoutGrid, PanelRight, SlidersHorizontal, FileText, Clock3, AlertCircle, CheckCircle2, LoaderCircle, Eye, ShieldCheck, Check, FolderOpen } from '@lucide/vue'
+import ConnectionDialog from './ConnectionDialog.vue'
+import GroupDialog from './GroupDialog.vue'
+import InlineGroupEditor from './InlineGroupEditor.vue'
+import { version as appVersion } from '../package.json'
+import { APP_ICON, api, defaults, fromProfile, errorText, isDesktop, type Profile, type ConnectionInput, type ConnectionGroup, type SessionInfo, type DatabaseObject, type TestResult } from './api'
 
+type Category = 'tables'|'views'|'functions'|'events'
+type WorkspaceRow = { key:string; name:string; kind:'connection'|'database'|Category; profile?:Profile; database?:string; object?:DatabaseObject }
+type MenuItem = {label:string; shortcut?:string; disabled?:boolean; danger?:boolean; checked?:boolean; action:()=>void|Promise<void>}
 const profiles = ref<Profile[]>([])
+const connectionGroups=ref<ConnectionGroup[]>([])
+const selectedGroupID=ref('')
+const expandedGroups=reactive(new Set<string>())
+const groupDialogOpen=ref(false)
+const groupForm=reactive({groupId:''})
+const groupError=ref('')
+const groupEditor=reactive({active:false,id:'',name:'',error:''})
+let groupConnection:Profile|undefined
 const sessions = reactive<Record<string,SessionInfo>>({})
 const selectedID = ref('')
-const mode = ref<'welcome'|'editor'|'overview'>('welcome')
-const form = reactive(defaults())
-const baseline = ref(JSON.stringify(form))
+const selectedDatabase = ref('')
+const category = ref<Category>('tables')
+const selectedRowKey = ref('')
+const objects = ref<DatabaseObject[]>([])
+const objectsLoading = ref(false)
+const objectsError = ref('')
+const truncated = ref(false)
+const informationTab=ref<'info'|'ddl'>('info')
+const openedTableKey=ref('')
+const ddlText=ref(''),ddlError=ref(''),ddlLoading=ref(false)
+let ddlRequest=0
 const search = ref('')
+const objectSearch = ref('')
 const group = ref('all')
+const rootExpanded = ref(true)
+const expandedConnections = reactive(new Set<string>())
+const expandedDatabases = reactive(new Set<string>())
+const openedDatabases = reactive(new Set<string>())
+const leftWidth = ref(240)
+const rightWidth = ref(218)
+const showSidebar = ref(true)
+const showInformation = ref(true)
+const viewMode = ref<'details'|'icons'>('details')
 const busy = ref('')
 const loading = ref(true)
 const fatalError = ref('')
-const message = ref('')
-const messageKind = ref('success')
 const configPath = ref('')
-const showPassword = ref(false)
-const advanced = ref(false)
+const desktop = ref(isDesktop())
+const menu = ref('')
+const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'})
+const navigationError=ref('')
+const draggedConnectionID=ref('')
+const movingConnectionID=ref('')
+const dropTarget=ref<string|null>(null)
+const draggedConnection=computed(()=>profiles.value.find(p=>p.id===draggedConnectionID.value))
+const connectionDragType='application/x-bajiu-connection'
+const form = reactive(defaults())
+const baseline = ref(JSON.stringify(form))
+const dialogOpen = ref(false)
+const editingID = ref('')
+const connectOnSave = ref(false)
+const dialogRef = ref<InstanceType<typeof ConnectionDialog>|null>(null)
+const errors = reactive<Record<string,string>>({})
 const testResult = ref<TestResult|null>(null)
 const testError = ref('')
-const activeMenu = ref(false)
-const dbSearch = ref('')
-const errors = reactive<Record<string,string>>({})
-const desktop = ref(isDesktop())
-const modal = reactive({open:false,title:'',body:'',label:'',danger:false,action:null as null|(()=>void|Promise<void>)})
-const selected = computed(()=>profiles.value.find(p=>p.id===selectedID.value))
-const live = computed(()=>sessions[selectedID.value])
-const dirty = computed(()=>JSON.stringify(form)!==baseline.value)
-const groups = [{id:'all',label:'全部连接'},{id:'local',label:'本地'},{id:'development',label:'开发'},{id:'staging',label:'测试'},{id:'production',label:'生产'}]
-const filtered = computed(()=>profiles.value.filter(p=>(group.value==='all'||p.environment===group.value)&&`${p.name} ${p.host} ${p.username}`.toLowerCase().includes(search.value.toLowerCase())))
-const databases = computed(()=>live.value?.databases.filter(n=>n.toLowerCase().includes(dbSearch.value.toLowerCase()))??[])
-const connectedCount = computed(()=>Object.keys(sessions).length)
-const envName = (id:string)=>groups.find(g=>g.id===id)?.label??'未分组'
-const address = (p:Profile)=>`${p.host.includes(':')?'['+p.host+']':p.host}:${p.port}`
-const dateText = (s:string)=>s?new Date(s).toLocaleString('zh-CN',{hour12:false}):'—'
-let timer:ReturnType<typeof setTimeout>|undefined
+const confirm = reactive({open:false,title:'',body:'',label:'',danger:false,action:null as null|(()=>void|Promise<void>)})
+const about = ref(false)
+type RuntimeCredentials=Pick<ConnectionInput,'password'|'sshPassword'|'sshKeyPassphrase'|'httpToken'>
+const transientPasswords = new Map<string,RuntimeCredentials>()
+let returnFocus:HTMLElement|null=null
 let poll:ReturnType<typeof setInterval>|undefined
+let objectRequest=0
+let releaseDrag:(()=>void)|undefined
 
-function notice(text:string,kind='success'){message.value=text;messageKind.value=kind;clearTimeout(timer);timer=setTimeout(()=>message.value='',5500)}
+const groups=[{id:'all',label:'全部'},{id:'local',label:'本地'},{id:'development',label:'开发'},{id:'staging',label:'测试'},{id:'production',label:'生产'}]
+const categories:[Category,string,typeof Table2][]=[['tables','表',Table2],['views','视图',PanelsTopLeft],['functions','函数',Braces],['events','事件',Clock3]]
+const selected = computed(()=>profiles.value.find(p=>p.id===selectedID.value))
+const selectedConnectionGroup=computed(()=>connectionGroups.value.find(g=>g.id===selectedGroupID.value))
+const live = computed(()=>sessions[selectedID.value])
+const categoryName = computed(()=>categories.find(c=>c[0]===category.value)?.[1]??'表')
+const filteredProfiles = computed(()=>profiles.value.filter(p=>(group.value==='all'||p.environment===group.value)&&`${p.name} ${p.host} ${p.username} ${(sessions[p.id]?.databases??[]).join(' ')}`.toLowerCase().includes(search.value.toLowerCase())))
+const navigationSections=computed(()=>[
+ {id:'',name:'',profiles:filteredProfiles.value.filter(p=>!p.groupId)},
+ ...connectionGroups.value.map(g=>({...g,profiles:(search.value.trim()&&g.name.toLowerCase().includes(search.value.trim().toLowerCase())?profiles.value.filter(p=>group.value==='all'||p.environment===group.value):filteredProfiles.value).filter(p=>p.groupId===g.id)})).filter(g=>!search.value.trim()||g.profiles.length||g.name.toLowerCase().includes(search.value.trim().toLowerCase()))
+])
+const dirty = computed(()=>JSON.stringify(form)!==baseline.value)
+const workspaceRows = computed<WorkspaceRow[]>(()=>{
+  let rows:WorkspaceRow[]
+  if(selectedDatabase.value) rows=objects.value.map(o=>({key:o.name,name:o.name,kind:category.value,object:o}))
+  else if(selected.value) rows=(live.value?.databases??[]).map(name=>({key:name,name,kind:'database',database:name}))
+  else rows=filteredProfiles.value.filter(p=>!selectedGroupID.value||p.groupId===selectedGroupID.value).map(p=>({key:p.id,name:p.name,kind:'connection',profile:p}))
+  const term=objectSearch.value.trim().toLowerCase()
+  return term?rows.filter(row=>`${row.name} ${row.object?.comment??''}`.toLowerCase().includes(term)):rows
+})
+const selectedRow = computed(()=>workspaceRows.value.find(r=>r.key===selectedRowKey.value))
+const selectedObject = computed(()=>selectedRow.value?.object)
+const canShowDDL=computed(()=>selectedObject.value?.kind==='tables'&&openedTableKey.value===JSON.stringify([selectedID.value,selectedDatabase.value,selectedObject.value.name]))
+const informationName = computed(()=>selectedObject.value?.name??selectedRow.value?.name??selectedDatabase.value??'')
+const scopeName = computed(()=>selectedDatabase.value?categoryName.value:selected.value?'数据库':'连接')
+const columns = computed(()=>selectedDatabase.value
+  ? category.value==='tables'||category.value==='views'?['名称','自动递增值','修改日期','数据长度','引擎','行','注释']:['名称','类型 / 状态','修改日期','创建日期','注释']
+  : selected.value?['名称','类型']:['名称','主机','端口','用户名','环境','状态'])
+
+function address(p:Profile){return `${p.host.includes(':')?'['+p.host+']':p.host}:${p.port}`}
+function envName(id:string){return groups.find(g=>g.id===id)?.label??'本地'}
+function dateText(date:string){return date?new Date(date).toLocaleString('zh-CN',{hour12:false}):'—'}
+function bytesText(value:string){if(!value)return '—';try{const number=BigInt(value);if(number<1024n)return number+' B';if(number<1048576n)return (Number(number)/1024).toFixed(1)+' KiB';if(number<1073741824n)return (Number(number)/1048576).toFixed(1)+' MiB';return (Number(number)/1073741824).toFixed(1)+' GiB'}catch{return value}}
+function showNavigationError(text:string){navigationError.value=text}
 function clearFeedback(){testResult.value=null;testError.value='';for(const key of Object.keys(errors))delete errors[key]}
-function assignProfile(p?:Profile){Object.assign(form,p?fromProfile(p):defaults());baseline.value=JSON.stringify(form);showPassword.value=false;clearFeedback()}
-function confirmAction(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false){Object.assign(modal,{open:true,title,body,label,action,danger});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-modal-cancel]')?.focus())}
-async function acceptModal(){const action=modal.action;modal.open=false;modal.action=null;await action?.()}
-function navigate(action:()=>void){activeMenu.value=false;if(mode.value==='editor'&&dirty.value){confirmAction('放弃未保存的修改？','当前连接的修改尚未保存。放弃后将恢复到上次保存的配置。','放弃修改',action,true)}else action()}
-function create(){navigate(()=>{selectedID.value='';assignProfile();mode.value='editor';advanced.value=false;nextTick(()=>document.getElementById('connection-name')?.focus())})}
-function select(p:Profile){if(selectedID.value===p.id)return;navigate(()=>{selectedID.value=p.id;assignProfile(p);mode.value='overview';dbSearch.value=''})}
-function edit(){if(selected.value){assignProfile(selected.value);mode.value='editor';advanced.value=form.tlsMode==='verify'}}
-function duplicate(){if(!selected.value)return;const p=selected.value;navigate(()=>{assignProfile();Object.assign(form,{...p,id:'',revision:0,name:p.name+' 副本',hasPassword:false,password:'',passwordAction:'replace',rememberPassword:true,createdAt:'',updatedAt:''});baseline.value=JSON.stringify(defaults());selectedID.value='';mode.value='editor';notice('已复制配置，请重新输入密码后保存')})}
-function validate(requireName=true){for(const key of Object.keys(errors))delete errors[key];if(requireName&&!form.name.trim())errors.name='请输入连接名称';if(!form.host.trim())errors.host='请输入主机地址';if(!Number.isInteger(Number(form.port))||form.port<1||form.port>65535)errors.port='端口范围为 1–65535';if(!form.username.trim())errors.username='请输入用户名';return Object.keys(errors).length===0}
-function payload(){const {createdAt:_,updatedAt:__,hasPassword:___,...input}=form;return {...input,port:Number(form.port),timeout:Number(form.timeout)}}
-async function save(stayInEditor=false){if(!validate()||busy.value)return false;busy.value='save';try{const password=form.password;const action=form.passwordAction;const remember=form.rememberPassword;const p=await api.SaveConnection(payload());delete sessions[p.id];profiles.value=await api.ListConnections();selectedID.value=p.id;assignProfile(p);if(!remember&&action==='replace'){form.password=password;form.passwordAction='replace';baseline.value=JSON.stringify(form)}mode.value=stayInEditor?'editor':'overview';notice('连接已保存');return true}catch(e){notice(errorText(e),'error');return false}finally{busy.value=''}}
-async function connect(){if(busy.value)return;if(mode.value==='editor'){if(!await save(true))return}if(!selectedID.value)return;busy.value='connect';testError.value='';try{sessions[selectedID.value]=await api.Connect(payload());mode.value='overview';notice('已连接到 '+(selected.value?.name??'MySQL'))}catch(e){testError.value=errorText(e);notice(testError.value,'error')}finally{busy.value=''}}
-async function test(){if(!validate(false)||busy.value)return;busy.value='test';testResult.value=null;testError.value='';try{testResult.value=await api.TestConnection(payload())}catch(e){testError.value=errorText(e)}finally{busy.value=''}}
-async function disconnect(){if(busy.value)return;busy.value='disconnect';try{await api.Disconnect(selectedID.value);delete sessions[selectedID.value];notice('连接已断开')}catch(e){notice(errorText(e),'error')}finally{busy.value=''}}
-async function refresh(){if(busy.value||!live.value)return;busy.value='refresh';try{sessions[selectedID.value]=await api.RefreshDatabases(selectedID.value)}catch(e){delete sessions[selectedID.value];notice(errorText(e),'error')}finally{busy.value=''}}
-function remove(){const p=selected.value;if(!p)return;confirmAction('删除“'+p.name+'”？','将删除此设备上的连接配置和保存的密码，不会删除服务器上的任何数据库。','删除连接',async()=>{busy.value='delete';try{await api.DeleteConnection(p.id,p.revision);delete sessions[p.id];profiles.value=await api.ListConnections();selectedID.value='';assignProfile();mode.value='welcome';notice('连接已删除')}catch(e){notice(errorText(e),'error')}finally{busy.value=''}},true)}
-function cancelEdit(){navigate(()=>{assignProfile(selected.value);mode.value=selected.value?'overview':'welcome'})}
-async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.caPath=path}catch(e){notice(errorText(e),'error')}}
-function pwdChanged(){form.passwordAction='replace';clearFeedback()}
-function forgetPassword(){form.password='';form.passwordAction='forget';form.rememberPassword=false;form.hasPassword=false}
-async function copyAddress(){try{await navigator.clipboard.writeText(address(form));notice('地址已复制')}catch{notice('无法访问剪贴板，可在连接设置中复制地址','error')}}
-function shortcuts(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();if(!busy.value)create()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&mode.value==='editor'){e.preventDefault();void save()}if(e.key==='Escape'){if(modal.open)modal.open=false;else activeMenu.value=false}}
-function trapDialog(e:KeyboardEvent){const dialog=e.currentTarget as HTMLElement;const buttons=Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=buttons[0],last=buttons[buttons.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
+function requestInput(){const {createdAt:_,updatedAt:__,hasPassword:___,...input}=form;return {...input,port:Number(form.port),timeout:Number(form.timeout)}}
+function connectionInput(p:Profile){const input=fromProfile(p);if(transientPasswords.has(p.id))Object.assign(input,transientPasswords.get(p.id),{passwordAction:'replace',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace'});const {createdAt:_,updatedAt:__,hasPassword:___,...request}=input;return request}
+function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false){Object.assign(confirm,{open:true,title,body,label,action,danger});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
+async function acceptConfirm(){const action=confirm.action;confirm.open=false;confirm.action=null;await action?.()}
+function cancelConfirm(){confirm.open=false;nextTick(()=>{if(dialogOpen.value)document.getElementById('connection-name')?.focus();else(document.querySelector('[data-tree-row]') as HTMLElement|null)?.focus()})}
+function focusReturn(){nextTick(()=>{if(returnFocus?.isConnected)returnFocus.focus();else(document.querySelector<HTMLElement>('.tree-connection.selected')??document.querySelector<HTMLElement>('.tree-group.selected')??document.querySelector<HTMLElement>('.tree-root'))?.focus()})}
+function closeDialog(){dialogOpen.value=false;clearFeedback();Object.assign(form,defaults());baseline.value=JSON.stringify(form);focusReturn()}
+function cancelDialog(){if(busy.value)return;if(dirty.value)ask('放弃未保存的修改？','此连接的修改尚未保存。是否放弃这些修改并关闭窗口？','放弃修改',closeDialog,true);else closeDialog()}
+function openDialog(p?:Profile,connect=false){
+  if(busy.value)return
+  returnFocus=document.activeElement as HTMLElement
+  clearFeedback();menu.value='';contextMenu.open=false
+  Object.assign(form,p?fromProfile(p):defaults())
+  if(!p)form.groupId=selectedGroupID.value
+  if(p&&transientPasswords.has(p.id))Object.assign(form,transientPasswords.get(p.id),{passwordAction:'replace',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace'})
+  editingID.value=p?.id??'';connectOnSave.value=connect;baseline.value=JSON.stringify(form);dialogOpen.value=true
+}
+function create(){openDialog()}
+function edit(){if(selected.value)openDialog(selected.value)}
+function duplicate(){const p=selected.value;if(!p)return;openDialog();Object.assign(form,{...p,id:'',revision:0,name:p.name+' 副本',hasPassword:false,password:'',passwordAction:'replace',rememberPassword:true,createdAt:'',updatedAt:''});}
+function validate(requireName=true){for(const key of Object.keys(errors))delete errors[key];if(requireName&&!form.name.trim())errors.name='请输入连接名';if(!form.host.trim())errors.host='请输入主机地址';if(!Number.isInteger(Number(form.port))||form.port<1||form.port>65535)errors.port='端口范围为 1–65535';if(!form.username.trim())errors.username='请输入用户名';if(Object.keys(errors).length){dialogRef.value?.showValidation();return false}return true}
+function clearDDL(){ddlRequest++;openedTableKey.value='';informationTab.value='info';ddlText.value='';ddlError.value='';ddlLoading.value=false}
+function invalidateObjects(){objectRequest++;objects.value=[];objectsError.value='';objectsLoading.value=false;selectedRowKey.value='';truncated.value=false;clearDDL()}
+function clearDatabaseState(id:string){for(const state of [openedDatabases,expandedDatabases])for(const key of state)if(key.startsWith(id+'/'))state.delete(key)}
+function databaseIsOpen(id:string,database:string){return !!sessions[id]&&openedDatabases.has(id+'/'+database)}
+function databaseIconClass(id:string,database:string){return databaseIsOpen(id,database)?'database-icon database-open':'database-icon'}
+function selectProfile(p:Profile){if(busy.value||dialogOpen.value||groupDialogOpen.value)return;if(selectedID.value===p.id&&!selectedDatabase.value)return;selectedGroupID.value=p.groupId??'';selectedID.value=p.id;selectedDatabase.value='';objectSearch.value='';invalidateObjects()}
+function selectRoot(){if(busy.value||dialogOpen.value||groupDialogOpen.value)return;selectedGroupID.value='';selectedID.value='';selectedDatabase.value='';objectSearch.value='';invalidateObjects()}
+function selectConnectionGroup(id:string){if(busy.value||dialogOpen.value||groupDialogOpen.value)return;selectRoot();selectedGroupID.value=id}
+function toggleGroup(id:string){if(expandedGroups.has(id))expandedGroups.delete(id);else expandedGroups.add(id)}
+function startConnectionDrag(e:DragEvent,p:Profile){
+ if(busy.value||loading.value||dialogOpen.value||groupDialogOpen.value||confirm.open||about.value||groupEditor.active||!e.dataTransfer){e.preventDefault();return}
+ closeMenus();navigationError.value='';draggedConnectionID.value=p.id;dropTarget.value=null
+ e.dataTransfer.effectAllowed='move';e.dataTransfer.setData(connectionDragType,p.id)
+}
+function endConnectionDrag(){draggedConnectionID.value='';dropTarget.value=null}
+function canDropConnection(target:string,e:DragEvent){
+ const p=draggedConnection.value
+ return !!p&&!busy.value&&!dialogOpen.value&&!groupDialogOpen.value&&!confirm.open&&!about.value&&!groupEditor.active&&!!e.dataTransfer?.types.includes(connectionDragType)&&(p.groupId??'')!==target&&(!target||connectionGroups.value.some(g=>g.id===target))
+}
+function overConnectionTarget(e:DragEvent,target:string){
+ if(!canDropConnection(target,e)){if(e.dataTransfer)e.dataTransfer.dropEffect='none';dropTarget.value=null;return}
+ e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='move';dropTarget.value=target
+}
+function leaveConnectionTarget(e:DragEvent,target:string){
+ if(e.relatedTarget instanceof Node&&(e.currentTarget as HTMLElement).contains(e.relatedTarget))return
+ if(dropTarget.value===target)dropTarget.value=null
+}
+async function dropConnection(e:DragEvent,target:string){
+ e.preventDefault()
+ const p=draggedConnection.value
+ const valid=p&&canDropConnection(target,e)&&e.dataTransfer?.getData(connectionDragType)===p.id
+ endConnectionDrag()
+ if(!valid||!p)return
+ navigationError.value='';busy.value='move-connection';movingConnectionID.value=p.id
+ try{
+  const updated=await api.MoveConnectionToGroup(p.id,p.revision,target)
+  profiles.value=profiles.value.map(profile=>profile.id===updated.id?updated:profile)
+  if(selectedID.value===updated.id)selectedGroupID.value=updated.groupId??''
+  if(updated.groupId)expandedGroups.add(updated.groupId)
+  rootExpanded.value=true
+ }catch(error){showNavigationError(errorText(error))}finally{busy.value='';movingConnectionID.value=''}
+}
+function showGroupDialog(){
+ if(busy.value)return
+ returnFocus=document.activeElement as HTMLElement;closeMenus();groupError.value=''
+ groupConnection=selected.value
+ groupForm.groupId=groupConnection?.groupId??''
+ groupDialogOpen.value=true
+}
+function beginGroupEdit(target?:ConnectionGroup){
+ if(busy.value||dialogOpen.value||groupDialogOpen.value)return
+ closeMenus();rootExpanded.value=true;search.value=''
+ if(target)selectConnectionGroup(target.id);else selectRoot()
+ let name=target?.name??'新建组'
+ if(!target){let index=2;while(connectionGroups.value.some(g=>g.name===name))name='新建组 ('+(index++)+')'}
+ Object.assign(groupEditor,{active:true,id:target?.id??'',name,error:''})
+ nextTick(()=>{const input=document.querySelector<HTMLInputElement>('.inline-group-name');input?.focus();input?.select()})
+}
+function cancelGroupEdit(){if(busy.value)return;groupEditor.active=false;groupEditor.error='';focusReturn()}
+async function saveInlineGroup(){
+ if(!groupEditor.active||busy.value)return
+ if(!groupEditor.name.trim()){groupEditor.error='请输入组名';return}
+ busy.value='group-edit';groupEditor.error=''
+ const id=groupEditor.id
+ try{
+  const saved=await api.SaveGroup(id,groupEditor.name)
+  const index=connectionGroups.value.findIndex(g=>g.id===saved.id)
+  if(index<0)connectionGroups.value=[...connectionGroups.value,saved];else connectionGroups.value=connectionGroups.value.map(g=>g.id===saved.id?saved:g)
+  selectedGroupID.value=saved.id;selectedID.value='';selectedDatabase.value='';invalidateObjects();expandedGroups.add(saved.id);groupEditor.active=false
+  focusReturn()
+ }catch(e){groupEditor.error=errorText(e)}finally{busy.value=''}
+}
+function removeGroup(){
+ const target=selectedConnectionGroup.value
+ if(!target||busy.value)return
+ const count=profiles.value.filter(p=>p.groupId===target.id).length
+ ask('删除组“'+target.name+'”？',count?'组内 '+count+' 个连接将移回“我的连接”，连接配置、密码和已打开的会话都会保留。':'只删除此空组，不会删除任何连接或数据库。','删除组',async()=>{
+  busy.value='delete-group'
+  try{
+   await api.DeleteGroup(target.id)
+   profiles.value=await api.ListConnections()
+   connectionGroups.value=connectionGroups.value.filter(g=>g.id!==target.id);expandedGroups.delete(target.id);selectedGroupID.value='';selectedID.value='';selectedDatabase.value='';invalidateObjects();focusReturn()
+  }catch(e){showNavigationError(errorText(e))}finally{busy.value=''}
+ },true)
+}
+function closeGroupDialog(){if(busy.value)return;groupDialogOpen.value=false;groupError.value='';groupConnection=undefined;focusReturn()}
+async function saveGroupDialog(){
+ if(busy.value)return
+ groupError.value='';busy.value='group'
+ try{
+   if(!groupConnection)throw new Error('请重新选择连接')
+   const updated=await api.MoveConnectionToGroup(groupConnection.id,groupConnection.revision,groupForm.groupId)
+   profiles.value=profiles.value.map(p=>p.id===updated.id?updated:p);selectedGroupID.value=updated.groupId??''
+   if(updated.groupId)expandedGroups.add(updated.groupId)
+   
+  busy.value='';closeGroupDialog()
+ }catch(e){groupError.value=errorText(e)}finally{busy.value=''}
+}
+async function disconnectAll(){
+ if(busy.value)return
+ busy.value='disconnect-all'
+ try{
+  await api.DisconnectAll()
+  for(const id of Object.keys(sessions))delete sessions[id]
+  openedDatabases.clear();expandedDatabases.clear();expandedConnections.clear();selectedDatabase.value='';invalidateObjects();
+ }catch(e){showNavigationError(errorText(e))}finally{busy.value=''}
+}
+async function saveDialog(){
+  if(!validate()||busy.value)return
+  busy.value='save'
+  const source=requestInput(),shouldConnect=connectOnSave.value
+  try{
+    const profile=await api.SaveConnection(source)
+    delete sessions[profile.id];clearDatabaseState(profile.id)
+    if(!source.rememberPassword)transientPasswords.set(profile.id,{password:source.password,sshPassword:source.sshPassword,sshKeyPassphrase:source.sshKeyPassphrase,httpToken:source.httpToken})
+    else transientPasswords.delete(profile.id)
+    profiles.value=await api.ListConnections();selectedID.value=profile.id;selectedGroupID.value=profile.groupId??'';if(profile.groupId)expandedGroups.add(profile.groupId);selectedDatabase.value='';invalidateObjects()
+    closeDialog();rootExpanded.value=true;expandedConnections.delete(profile.id)
+    
+    busy.value=''
+    if(shouldConnect)await openConnection(profile)
+  }catch(e){testError.value=errorText(e)}finally{busy.value=''}
+}
+async function testConnection(){if(!validate(false)||busy.value)return;busy.value='test';testResult.value=null;testError.value='';try{testResult.value=await api.TestConnection(requestInput())}catch(e){testError.value=errorText(e)}finally{busy.value=''}}
+async function openConnection(p=selected.value){
+  if(!p||busy.value||dialogOpen.value)return
+  selectProfile(p)
+  if(sessions[p.id]){expandedConnections.add(p.id);return}
+  if(!p.hasPassword&&!transientPasswords.has(p.id)){openDialog(p,true);return}
+  busy.value='connect';objectsError.value=''
+  try{sessions[p.id]=await api.Connect(connectionInput(p));expandedConnections.add(p.id);}
+  catch(e){objectsError.value=errorText(e)}
+  finally{busy.value=''}
+}
+async function toggleConnection(p:Profile){if(busy.value)return;if(expandedConnections.has(p.id)){expandedConnections.delete(p.id);return}await openConnection(p)}
+async function disconnect(){const id=selectedID.value;if(!id||busy.value)return;busy.value='disconnect';try{await api.Disconnect(id);delete sessions[id];clearDatabaseState(id);expandedConnections.delete(id);selectedDatabase.value='';invalidateObjects();}catch(e){showNavigationError(errorText(e))}finally{busy.value=''}}
+async function selectDatabase(p:Profile,database:string,kind:Category='tables'){
+  if(busy.value||dialogOpen.value||!sessions[p.id])return
+  selectedID.value=p.id;selectedDatabase.value=database;category.value=kind;objectSearch.value='';expandedConnections.add(p.id);selectedRowKey.value=''
+  await loadObjects()
+}
+function selectDatabaseInfo(p:Profile,database:string){if(busy.value||dialogOpen.value)return;selectedID.value=p.id;selectedGroupID.value=p.groupId??'';selectedDatabase.value='';objectSearch.value='';invalidateObjects();selectedRowKey.value=database;showInformation.value=true}
+async function loadObjects(){
+  const id=selectedID.value,database=selectedDatabase.value,kind=category.value
+  if(!id||!database||!sessions[id])return
+  const request=++objectRequest;objectsLoading.value=true;objectsError.value='';objects.value=[];truncated.value=false;selectedRowKey.value='';clearDDL()
+  try{const result=await api.ListObjects(id,database,kind);if(request===objectRequest){objects.value=result.objects??[];truncated.value=result.truncated;openedDatabases.add(id+'/'+database);expandedDatabases.add(id+'/'+database)}}
+  catch(e){if(request===objectRequest)objectsError.value=errorText(e)}
+  finally{if(request===objectRequest)objectsLoading.value=false}
+}
+async function changeCategory(kind:Category){category.value=kind;if(selectedDatabase.value)await loadObjects()}
+function toggleDatabase(p:Profile,database:string){const key=p.id+'/'+database;if(expandedDatabases.has(key))expandedDatabases.delete(key);else void selectDatabase(p,database)}
+async function refresh(){if(busy.value||!live.value)return;if(selectedDatabase.value){await loadObjects();return}busy.value='refresh';try{sessions[selectedID.value]=await api.RefreshDatabases(selectedID.value);objectsError.value=''}catch(e){delete sessions[selectedID.value];clearDatabaseState(selectedID.value);expandedConnections.delete(selectedID.value);invalidateObjects();objectsError.value=errorText(e)}finally{busy.value=''}}
+function selectWorkspaceRow(row:WorkspaceRow){selectedRowKey.value=row.key;clearDDL()}
+async function showDDL(){
+ if(!canShowDDL.value||!selectedObject.value)return
+ informationTab.value='ddl';if(ddlLoading.value||ddlText.value)return
+ const request=++ddlRequest;ddlLoading.value=true;ddlError.value=''
+ try{const result=await api.TableDDL(selectedID.value,selectedDatabase.value,selectedObject.value.name);if(request===ddlRequest)ddlText.value=result}catch(error){if(request===ddlRequest)ddlError.value=errorText(error)}finally{if(request===ddlRequest)ddlLoading.value=false}
+}
+function openRow(row:WorkspaceRow){selectWorkspaceRow(row);if(row.profile)void toggleConnection(row.profile);else if(row.database&&selected.value)void selectDatabase(selected.value,row.database);else{showInformation.value=true;if(row.object?.kind==='tables'){openedTableKey.value=JSON.stringify([selectedID.value,selectedDatabase.value,row.object.name]);void showDDL()}}}
+function remove(){const p=selected.value;if(!p)return;ask('删除连接“'+p.name+'”？','仅删除本机的连接配置和保存的密码，不会删除服务器上的数据库。','删除连接',async()=>{busy.value='delete';try{await api.DeleteConnection(p.id,p.revision);delete sessions[p.id];clearDatabaseState(p.id);transientPasswords.delete(p.id);expandedConnections.delete(p.id);profiles.value=await api.ListConnections();busy.value='';selectRoot();}catch(e){showNavigationError(errorText(e))}finally{busy.value=''}},true)}
+function passwordChanged(){form.passwordAction='replace';clearFeedback()}
+function forgetPassword(){form.password='';form.sshPassword='';form.sshKeyPassphrase='';form.httpToken='';form.passwordAction='forget';form.sshPasswordAction='replace';form.sshKeyPassphraseAction='replace';form.httpTokenAction='replace';form.rememberPassword=false;form.hasPassword=false}
+async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.caPath=path}catch(e){testError.value=errorText(e)}}
+async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
+function showContext(e:MouseEvent,kind:'root'|'group'|'connection'){
+ if(busy.value||dialogOpen.value||groupDialogOpen.value)return
+ navigationError.value='';contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-230));menu.value=''
+ nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
+}
+function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'connection')}
+function contextForRoot(e:MouseEvent){selectRoot();showContext(e,'root')}
+function contextForGroup(e:MouseEvent,id:string){selectConnectionGroup(id);showContext(e,'group')}
+function contextItems():MenuItem[]{
+ if(contextMenu.kind==='connection')return [...connectionMenu().slice(0,3),{label:'移至分组…',disabled:!selected.value||!!busy.value||(!connectionGroups.value.length&&!selected.value.groupId),action:showGroupDialog},...connectionMenu().slice(3)]
+ const items:MenuItem[]=[{label:'新建连接…',disabled:!!busy.value||!!fatalError.value,action:create}]
+ if(contextMenu.kind==='root')items.push({label:'新建组',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit()})
+ else items.push({label:'重命名组',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit(selectedConnectionGroup.value)},{label:'删除组',disabled:!!busy.value||!!fatalError.value,danger:true,action:removeGroup})
+ items.push({label:'关闭所有连接',disabled:!!busy.value||!Object.keys(sessions).length,action:disconnectAll})
+ return items
+}
+function closeMenus(){menu.value='';contextMenu.open=false}
+function showMenu(name:string){contextMenu.open=false;menu.value=menu.value===name?'':name;nextTick(()=>document.querySelector<HTMLButtonElement>('.menu-popup button:not(:disabled)')?.focus())}
+function connectionMenu():MenuItem[]{return [{label:live.value?'关闭连接':'打开连接',shortcut:live.value?'':'Enter',disabled:!selected.value||!!busy.value,action:live.value?disconnect:()=>openConnection()},{label:'编辑连接…',disabled:!selected.value||!!busy.value,action:edit},{label:'复制连接…',disabled:!selected.value||!!busy.value,action:duplicate},{label:'删除连接',disabled:!selected.value||!!busy.value,danger:true,action:remove}]}
+function itemsFor(name:string):MenuItem[]{
+  if(name==='file')return [{label:'新建 MySQL 连接…',shortcut:'Ctrl+N',disabled:!!busy.value||!!fatalError.value,action:create},...connectionMenu(),{label:'退出',action:async()=>{if(desktop.value)await api.QuitApp()}}]
+  if(name==='view')return [{label:'刷新',shortcut:'F5',disabled:!live.value||!!busy.value,action:refresh},{label:'导航窗格',checked:showSidebar.value,action:()=>{showSidebar.value=!showSidebar.value}},{label:'信息窗格',checked:showInformation.value,action:()=>{showInformation.value=!showInformation.value}},{label:'详细信息',checked:viewMode.value==='details',action:()=>{viewMode.value='details'}},{label:'图标',checked:viewMode.value==='icons',action:()=>{viewMode.value='icons'}}]
+  if(name==='tools')return [{label:'编辑连接…',disabled:!selected.value||!!busy.value,action:edit},{label:'复制主机地址',disabled:!selected.value,action:()=>copyText(selected.value?address(selected.value):'')}]
+  if(name==='window')return profiles.value.length?profiles.value.map(p=>({label:p.name,checked:p.id===selectedID.value,action:()=>selectProfile(p)})):[{label:'没有打开的连接',disabled:true,action:()=>{}}]
+  return [{label:'关于 Bajiu DB…',action:()=>{about.value=true;nextTick(()=>document.querySelector<HTMLButtonElement>('[data-about-close]')?.focus())}}]
+}
+function invoke(item:MenuItem){if(item.disabled)return;closeMenus();void item.action()}
+function menuKeys(e:KeyboardEvent){if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const nodes=Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const i=nodes.indexOf(document.activeElement as HTMLButtonElement);nodes[e.key==='Home'?0:e.key==='End'?nodes.length-1:(i+(e.key==='ArrowDown'?1:nodes.length-1))%nodes.length]?.focus()}
+function treeKeys(e:KeyboardEvent){if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const nodes=Array.from(document.querySelectorAll<HTMLElement>('[data-tree-row]'));const i=nodes.indexOf(e.currentTarget as HTMLElement);nodes[e.key==='Home'?0:e.key==='End'?nodes.length-1:(i+(e.key==='ArrowDown'?1:nodes.length-1))%nodes.length]?.focus()}
+function visibleDatabases(p:Profile){const dbs=sessions[p.id]?.databases??[];const term=search.value.toLowerCase();return !term||`${p.name} ${p.host}`.toLowerCase().includes(term)?dbs:dbs.filter(db=>db.toLowerCase().includes(term))}
+function connectionHasDatabases(id:string){return (sessions[id]?.databases.length??0)>0}
+function trap(e:KeyboardEvent){const nodes=Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
+function startResize(e:PointerEvent,side:'left'|'right'){e.preventDefault();releaseDrag?.();const start=e.clientX,width=side==='left'?leftWidth.value:rightWidth.value;const move=(event:PointerEvent)=>{const next=width+(event.clientX-start)*(side==='left'?1:-1);if(side==='left')leftWidth.value=Math.min(400,Math.max(170,next));else rightWidth.value=Math.min(360,Math.max(180,next))};const stop=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',stop);document.body.style.cursor='';releaseDrag=undefined};document.addEventListener('pointermove',move);document.addEventListener('pointerup',stop,{once:true});document.body.style.cursor='col-resize';releaseDrag=stop}
+function resizeKeys(e:KeyboardEvent,side:'left'|'right'){if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const delta=e.key==='ArrowLeft'?-10:10;if(side==='left')leftWidth.value=Math.min(400,Math.max(170,leftWidth.value+delta));else rightWidth.value=Math.min(360,Math.max(180,rightWidth.value-delta))}
+async function copyText(value:string){try{await navigator.clipboard.writeText(value);}catch{showNavigationError('无法访问剪贴板')}}
+function shortcuts(e:KeyboardEvent){
+  if(e.key==='Escape'){e.preventDefault();if(confirm.open){confirm.open=false;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
+  if(groupDialogOpen.value)return
+  if(confirm.open||about.value)return
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&dialogOpen.value){e.preventDefault();void saveDialog();return}
+  if(dialogOpen.value)return
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();create()}
+  if(e.key==='F5'){e.preventDefault();void refresh()}
+  if(e.altKey&&e.key.toLowerCase()==='f'){e.preventDefault();showMenu('file')}
+}
 watch(()=>JSON.stringify(form),()=>{testResult.value=null;testError.value=''})
-onMounted(async()=>{document.addEventListener('keydown',shortcuts);try{if(desktop.value){profiles.value=await api.ListConnections();configPath.value=await api.ConfigPath();for(const s of await api.ListSessions())sessions[s.id]=s}}catch(e){fatalError.value=errorText(e)}finally{loading.value=false}poll=setInterval(async()=>{if(!desktop.value||busy.value)return;try{const current=await api.ListSessions();const ids=new Set(current.map(s=>s.id));for(const id of Object.keys(sessions))if(!ids.has(id))delete sessions[id]}catch{/* the next explicit operation reports bridge errors */}},15000)})
-onUnmounted(()=>{clearTimeout(timer);clearInterval(poll);document.removeEventListener('keydown',shortcuts)})
+watch([leftWidth,rightWidth,showSidebar,showInformation,viewMode],()=>{try{localStorage.setItem('bajiu.workspace-layout',JSON.stringify({left:leftWidth.value,right:rightWidth.value,sidebar:showSidebar.value,info:showInformation.value,view:viewMode.value}))}catch{/* settings are optional */}})
+onMounted(async()=>{
+ document.addEventListener('keydown',shortcuts)
+ try{const preferences=JSON.parse(localStorage.getItem('bajiu.workspace-layout')??'null');if(preferences){if(Number.isFinite(preferences.left))leftWidth.value=Math.min(400,Math.max(170,preferences.left));if(Number.isFinite(preferences.right))rightWidth.value=Math.min(360,Math.max(180,preferences.right));if(typeof preferences.sidebar==='boolean')showSidebar.value=preferences.sidebar;if(typeof preferences.info==='boolean')showInformation.value=preferences.info;if(['details','icons'].includes(preferences.view))viewMode.value=preferences.view}}catch{/* invalid preferences use defaults */}
+ try{if(desktop.value){connectionGroups.value=await api.ListGroups();for(const g of connectionGroups.value)expandedGroups.add(g.id);profiles.value=await api.ListConnections();configPath.value=await api.ConfigPath();for(const session of await api.ListSessions())sessions[session.id]=session}}catch(e){fatalError.value=errorText(e)}finally{loading.value=false}
+ poll=setInterval(async()=>{if(!desktop.value||busy.value)return;try{const list=await api.ListSessions();const ids=new Set(list.map(s=>s.id));for(const id of Object.keys(sessions))if(!ids.has(id)){delete sessions[id];clearDatabaseState(id);expandedConnections.delete(id);if(id===selectedID.value){selectedDatabase.value='';invalidateObjects()}}}catch{/* explicit refresh reports connection errors */}},15000)
+})
+onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);releaseDrag?.();transientPasswords.clear()})
 </script>
 
 <template>
-  <div class="app-shell" @click="activeMenu=false">
-    <header class="app-header">
-      <a class="brand" href="#" @click.prevent="navigate(()=>mode='welcome')" aria-label="Bajiu DB 首页"><span class="brand-mark"><span></span><span></span></span><span>Bajiu <b>DB</b><small>捌玖</small></span></a>
-      <span class="header-divider"></span><span class="header-title">MySQL 连接管理</span>
-      <div class="header-right"><span class="local-indicator"><span></span>本地工作空间</span><span class="version">v0.1.0</span></div>
-    </header>
-    <div v-if="!desktop" class="preview-banner">界面预览模式。连接测试、保存和数据库访问请在 Bajiu DB 桌面版中使用。</div>
-    <div v-if="fatalError" class="fatal-banner" role="alert"><AlertCircle :size="17"/>{{fatalError}}。为保护原配置，当前无法保存连接。</div>
-    <div class="workbench">
-      <aside class="sidebar" aria-label="连接列表">
-        <div class="sidebar-heading"><h2>连接</h2><span class="count">{{profiles.length}}</span><button class="icon-button sidebar-add" aria-label="新建连接" title="新建连接 Ctrl+N" @click="create" :disabled="!!busy||!!fatalError"><Plus :size="18"/></button></div>
-        <div class="sidebar-search"><Search :size="15"/><input v-model="search" aria-label="搜索连接" placeholder="搜索名称或主机…"/><kbd>⌕</kbd></div>
-        <div class="group-select"><SlidersHorizontal :size="14"/><select v-model="group" aria-label="按分组筛选"><option v-for="g in groups" :key="g.id" :value="g.id">{{g.label}}</option></select><ChevronDown :size="13"/></div>
-        <div class="connection-list">
-          <p v-if="loading" class="list-empty">正在读取连接…</p>
-          <div v-else-if="profiles.length===0" class="sidebar-empty"><Server :size="25" stroke-width="1.4"/><p>还没有连接</p><span>添加你的第一个 MySQL 服务器</span></div>
-          <p v-else-if="filtered.length===0" class="list-empty">没有匹配的连接</p>
-          <button v-for="p in filtered" :key="p.id" class="connection-item" :class="{selected:selectedID===p.id}" @click="!busy&&select(p)" :disabled="!!busy">
-            <span class="db-icon"><Database :size="19" stroke-width="1.6"/><i v-if="sessions[p.id]" class="online-dot"></i></span>
-            <span class="connection-copy"><strong>{{p.name}}</strong><small>{{address(p)}}</small></span><span class="env-dot" :class="p.environment" :title="envName(p.environment)"></span>
-          </button>
+  <div class="desktop-app" @click="closeMenus">
+    <div class="desktop-workspace" :inert="dialogOpen||groupDialogOpen||confirm.open||about||undefined">
+      <nav class="application-menubar" aria-label="主菜单">
+        <div v-for="entry in [{id:'file',label:'文件(F)'},{id:'view',label:'查看(V)'},{id:'favorites',label:'收藏夹(A)'},{id:'tools',label:'工具(T)'},{id:'window',label:'窗口(W)'},{id:'help',label:'帮助(H)'}]" :key="entry.id" class="application-menu">
+          <button :disabled="entry.id==='favorites'" :title="entry.id==='favorites'?'当前版本尚未提供收藏夹':''" :aria-expanded="menu===entry.id" aria-haspopup="menu" @click.stop="showMenu(entry.id)" :class="{open:menu===entry.id}">{{entry.label}}</button>
+          <div v-if="menu===entry.id" class="menu-popup" role="menu" @click.stop @keydown="menuKeys"><button v-for="item in itemsFor(entry.id)" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)"><span class="menu-check"><Check v-if="item.checked" :size="13"/></span><span>{{item.label}}</span><kbd v-if="item.shortcut">{{item.shortcut}}</kbd></button></div>
         </div>
-        <div class="sidebar-bottom"><span class="status-dot" :class="{'is-online':connectedCount>0}"></span>{{connectedCount?connectedCount+' 个连接已打开':'暂无活动连接'}}<ShieldCheck :size="14" title="配置保存在本机"/></div>
-      </aside>
-      <main class="main-pane">
-        <template v-if="mode==='welcome'">
-          <div class="welcome-toolbar"><span>工作空间</span><span class="muted">MySQL</span></div>
-          <section class="welcome">
-            <div class="welcome-illustration" aria-hidden="true"><div class="server-glyph"><Database :size="58" stroke-width="1.15"/></div><div class="illustration-line"></div><span class="terminal-glyph"><span>›</span><span class="terminal-cursor"></span></span><i class="illustration-check"><Check :size="13"/></i></div>
-            <h1>从一个连接开始</h1><p>把常用的 MySQL 服务器放在一起。<br/>清楚地管理每个环境，随时确认连接状态。</p>
-            <button class="button primary welcome-create" @click="create" :disabled="!!fatalError"><Plus :size="17"/>新建 MySQL 连接</button>
-            <span class="shortcut-hint">也可以按 <kbd>Ctrl</kbd> + <kbd>N</kbd></span>
-            <div class="welcome-features"><div><Server :size="18"/><strong>分环境管理</strong><span>本地、开发、测试和生产</span></div><div><KeyRound :size="18"/><strong>系统凭据保护</strong><span>密码不写入连接配置</span></div><div><Plug :size="18"/><strong>真实连接测试</strong><span>检查登录与数据库访问</span></div></div>
-          </section>
-          <footer class="welcome-footer"><ShieldCheck :size="15"/>连接配置保存在此设备，不上传到云端。</footer>
-        </template>
-        <template v-else>
-          <div class="connection-toolbar"><div class="breadcrumb"><span>连接</span><ChevronRight :size="14"/><strong>{{selected?.name??'新建连接'}}</strong></div><div class="toolbar-actions" v-if="selected"><button class="text-button" @click="duplicate" :disabled="!!busy"><Copy :size="14"/>复制配置</button><div class="more-wrap"><button class="icon-button" aria-label="更多连接操作" @click.stop="activeMenu=!activeMenu" :disabled="!!busy"><MoreHorizontal :size="19"/></button><div v-if="activeMenu" class="dropdown" @click.stop><button @click="activeMenu=false;remove()"><Trash2 :size="15"/>删除连接</button></div></div></div></div>
-          <section class="connection-intro"><span class="large-db-icon"><Database :size="27" stroke-width="1.5"/></span><div><div class="intro-title"><h1>{{mode==='editor'?(selected?'编辑连接':'新建 MySQL 连接'):selected?.name}}</h1><span v-if="selected" class="env-badge" :class="selected.environment">{{envName(selected.environment)}}</span><span v-if="dirty&&mode==='editor'" class="unsaved">未保存</span></div><p>{{mode==='editor'?'配置服务器地址和登录信息。保存前可以先测试连接。':address(form)+' / '+form.username}}</p></div><div v-if="mode==='overview'" class="intro-connect"><span class="connection-status" :class="{'is-online':live}"><i></i>{{live?'已连接':'未连接'}}</span><button v-if="live" class="button" @click="disconnect" :disabled="!!busy"><Unplug :size="15"/>断开</button><button v-else class="button primary" @click="connect" :disabled="!!busy"><LoaderCircle v-if="busy==='connect'" :size="15" class="spin"/><Plug v-else :size="15"/>{{busy==='connect'?'正在连接…':'连接'}}</button></div></section>
-          <div class="workspace-tabs"><button :class="{active:mode==='overview'}" :disabled="!selected||!!busy" @click="navigate(()=>{assignProfile(selected);mode='overview'})">连接概览</button><button :class="{active:mode==='editor'}" @click="!busy&&edit()" :disabled="!selected&&mode!=='editor'||!!busy">连接设置</button></div>
-          <div class="content-scroll">
-            <template v-if="mode==='editor'">
-              <form class="connection-form" @submit.prevent="save()" :aria-busy="!!busy">
-                <fieldset :disabled="!!busy||!!fatalError"><legend class="section-title">连接信息<span>为不同服务器设置容易识别的名称</span></legend>
-                  <div class="form-grid"><label class="field">连接名称<span class="required">*</span><input id="connection-name" v-model="form.name" placeholder="例如：本地开发数据库" maxlength="80" :aria-invalid="!!errors.name"/><small v-if="errors.name" class="field-error">{{errors.name}}</small></label><label class="field">环境分组<select v-model="form.environment"><option v-for="g in groups.filter(g=>g.id!=='all')" :key="g.id" :value="g.id">{{g.label}}</option></select></label></div>
-                  <div class="section-divider"></div><h2 class="section-title">服务器<span>使用 MySQL 服务的实际监听地址</span></h2>
-                  <div class="form-grid host-grid"><label class="field">主机地址<span class="required">*</span><input v-model="form.host" placeholder="127.0.0.1 或 db.example.com" spellcheck="false" :aria-invalid="!!errors.host"/><small v-if="errors.host" class="field-error">{{errors.host}}</small></label><label class="field">端口<span class="required">*</span><input v-model.number="form.port" type="number" min="1" max="65535" :aria-invalid="!!errors.port"/><small v-if="errors.port" class="field-error">{{errors.port}}</small></label></div>
-                  <div class="form-grid"><label class="field">用户名<span class="required">*</span><input v-model="form.username" placeholder="数据库用户名" autocomplete="off" spellcheck="false" :aria-invalid="!!errors.username"/><small v-if="errors.username" class="field-error">{{errors.username}}</small></label><label class="field">密码<span class="optional">可选</span><div class="password-input"><input v-model="form.password" :type="showPassword?'text':'password'" :placeholder="form.hasPassword&&form.passwordAction==='keep'?'已保存，留空保持原密码':'输入数据库密码'" autocomplete="new-password" @input="pwdChanged"/><button type="button" @click="showPassword=!showPassword" :aria-label="showPassword?'隐藏密码':'显示密码'">{{showPassword?'隐藏':'显示'}}</button></div></label></div>
-                  <div class="password-options"><label class="checkbox"><input type="checkbox" v-model="form.rememberPassword"/><span>记住密码</span></label><small>使用此设备的系统凭据库保存</small><button v-if="form.hasPassword&&form.passwordAction==='keep'" type="button" class="text-button danger-text" @click="forgetPassword">移除已存密码</button></div>
-                  <label class="field database-field">默认数据库<span class="optional">可选</span><input v-model="form.database" placeholder="留空，连接后查看可访问的数据库" spellcheck="false"/></label>
-                  <button type="button" class="advanced-toggle" @click="advanced=!advanced"><ChevronDown :size="16" :class="{collapsed:!advanced}"/>高级设置<span>TLS 与连接超时</span><span v-if="form.tlsMode==='verify'" class="tls-enabled">TLS 已启用</span></button>
-                  <div v-if="advanced" class="advanced-panel"><div class="form-grid"><label class="field">TLS 加密<select v-model="form.tlsMode"><option value="disabled">不启用 TLS</option><option value="verify">启用 TLS 并验证服务器证书</option></select></label><label class="field">连接超时<select v-model.number="form.timeout"><option :value="5">5 秒</option><option :value="10">10 秒</option><option :value="15">15 秒</option><option :value="30">30 秒</option></select></label></div><template v-if="form.tlsMode==='verify'"><label class="field">CA 证书<span class="optional">可选，默认使用系统信任库</span><div class="file-input"><input v-model="form.caPath" placeholder="选择 PEM 格式的 CA 证书"/><button type="button" class="icon-button" @click="chooseCA" aria-label="选择 CA 证书"><FolderOpen :size="17"/></button></div></label><label class="field">证书主机名<span class="optional">可选，默认使用连接主机</span><input v-model="form.serverName" placeholder="例如：mysql.example.com"/></label><p class="tls-note"><ShieldCheck :size="14"/>将验证服务器证书与主机名。</p></template><label class="field">备注<span class="optional">可选</span><textarea v-model="form.notes" rows="2" maxlength="2000" placeholder="记录连接用途或注意事项"></textarea></label></div>
-                </fieldset>
-              </form>
-            </template>
-            <template v-else>
-              <section class="overview-section"><div class="section-heading"><h2>连接信息</h2><button class="text-button" @click="edit" :disabled="!!busy"><Pencil :size="14"/>编辑设置</button></div><dl class="details-grid"><div><dt>主机与端口</dt><dd>{{address(form)}}<button class="icon-button small-icon" aria-label="复制地址" @click="copyAddress"><Copy :size="13"/></button></dd></div><div><dt>用户名</dt><dd>{{form.username}}</dd></div><div><dt>默认数据库</dt><dd :class="{muted:!form.database}">{{form.database||'未指定'}}</dd></div><div><dt>密码保存</dt><dd><KeyRound :size="14"/>{{selected?.hasPassword?'已保存在系统凭据库':'未保存'}}</dd></div><div><dt>TLS</dt><dd>{{form.tlsMode==='verify'?'启用，验证服务器证书':'未启用'}}</dd></div><div><dt>连接超时</dt><dd>{{form.timeout}} 秒</dd></div></dl><p v-if="form.notes" class="connection-note">{{form.notes}}</p></section>
-              <section class="overview-section database-section"><div class="section-heading"><h2>数据库<span v-if="live" class="count">{{live.databases.length}}</span></h2><button v-if="live" class="text-button" @click="refresh" :disabled="!!busy"><RefreshCw :size="14" :class="{spin:busy==='refresh'}"/>刷新列表</button></div><template v-if="live"><div class="server-meta"><CheckCircle2 :size="15"/><strong>{{live.serverVersion}}</strong><span>{{live.currentUser}}</span><span>连接耗时 {{live.latencyMs}} ms</span></div><div class="database-search"><Search :size="14"/><input v-model="dbSearch" placeholder="筛选数据库…" aria-label="筛选数据库"/></div><div class="database-list"><div v-for="db in databases" :key="db" class="database-row"><Database :size="17"/><span>{{db}}</span><span class="database-type">数据库</span></div><p v-if="databases.length===0" class="muted">没有匹配的数据库</p></div><p class="list-caption">列表仅显示当前账户有权限访问的数据库。点击刷新可检查连接是否仍然可用。</p></template><div v-else class="database-empty"><Cable :size="28" stroke-width="1.3"/><strong>连接后查看数据库</strong><p>使用保存的配置登录服务器，读取你有权限访问的数据库。</p><button class="button" @click="connect" :disabled="!!busy"><Plug :size="15"/>{{busy==='connect'?'正在连接…':'连接到 MySQL'}}</button></div></section>
-              <div class="record-time"><Clock3 :size="13"/>最近修改 {{dateText(selected?.updatedAt??'')}}</div>
-            </template>
-            <div v-if="testResult" class="result-panel success-result" role="status"><CheckCircle2 :size="19"/><div><strong>连接测试成功</strong><p>{{testResult.serverVersion}}<span>耗时 {{testResult.latencyMs}} ms</span></p></div></div>
-            <div v-if="testError" class="result-panel error-result" role="alert"><AlertCircle :size="19"/><div><strong>连接未成功</strong><p>{{testError}}</p></div></div>
+        <span class="application-brand">Bajiu DB <span>捌玖</span></span>
+      </nav>
+      <div class="main-toolbar" role="toolbar" aria-label="主工具栏">
+        <button class="large-tool" @click="create" :disabled="!!busy||!!fatalError" aria-label="新建连接"><Plug :size="27" class="connection-tool-icon"/><span>连接<ChevronDown :size="10"/></span></button>
+        <button class="large-tool" disabled title="当前版本尚未提供 SQL 编辑器"><FileCode2 :size="27" class="query-tool-icon"/><span>新建查询</span></button>
+        <span class="tool-separator"></span>
+        <button v-for="c in categories.slice(0,3)" :key="c[0]" class="large-tool category-tool" :class="{active:category===c[0]}" @click="changeCategory(c[0])" :disabled="!!busy"><component :is="c[2]" :size="27" :class="'category-'+c[0]"/><span>{{c[1]}}</span></button>
+        <button class="large-tool" disabled title="当前版本尚未提供账户管理"><Users :size="27"/><span>用户</span></button>
+        <button class="large-tool category-tool" :class="{active:category==='events'}" @click="changeCategory('events')" :disabled="!!busy"><Wrench :size="26" class="category-events"/><span>其他<ChevronDown :size="10"/></span></button>
+        <span class="tool-separator"></span>
+        <button class="large-tool" disabled title="当前版本尚未提供 SQL 查询"><FileText :size="26"/><span>查询</span></button><button class="large-tool" disabled title="当前版本尚未提供备份"><Archive :size="26"/><span>备份</span></button><button class="large-tool" disabled title="当前版本尚未提供自动运行"><Workflow :size="26"/><span>自动运行</span></button><button class="large-tool" disabled title="当前版本尚未提供数据模型"><Network :size="26"/><span>模型</span></button><button class="large-tool" disabled title="当前版本尚未提供图表"><ChartNoAxesColumn :size="26"/><span>图表</span></button>
+      </div>
+      <div v-if="!desktop" class="workspace-banner">界面预览模式。请在桌面版中保存和连接真实 MySQL。</div>
+      <div v-if="fatalError" class="workspace-banner error" role="alert"><AlertCircle :size="14"/>{{fatalError}}；当前已停止保存操作。</div>
+      <div class="workspace-body">
+        <aside v-if="showSidebar" class="navigation-pane" :style="{width:leftWidth+'px'}" aria-label="连接导航">
+<div v-if="navigationError" class="navigation-error" role="alert"><AlertCircle :size="13"/><span>{{navigationError}}</span><button class="tiny-button" aria-label="关闭错误提示" @click="navigationError=''" ><X :size="12"/></button></div>
+          <div class="navigation-scroll" @dragover.self="overConnectionTarget($event,'')" @dragleave.self="leaveConnectionTarget($event,'')" @drop.self.stop="dropConnection($event,'')" role="tree" aria-label="数据库连接树">
+            <button class="tree-row tree-root" :class="{'drop-target':dropTarget===''}" @dragover.stop="overConnectionTarget($event,'')" @dragleave.stop="leaveConnectionTarget($event,'')" @drop.stop="dropConnection($event,'')" role="treeitem" :aria-expanded="rootExpanded" data-tree-row @contextmenu.prevent.stop="contextForRoot($event)" @click="selectRoot" @dblclick="rootExpanded=!rootExpanded" @keydown="treeKeys" @keydown.right.prevent="rootExpanded=true" @keydown.left.prevent="rootExpanded=false"><span class="tree-expander" @click.stop="rootExpanded=!rootExpanded"><ChevronDown v-if="rootExpanded" :size="12"/><ChevronRight v-else :size="12"/></span><FolderOpen :size="16" class="folder-icon"/><span>我的连接</span></button>
+            <div v-if="rootExpanded" role="group">
+              <InlineGroupEditor v-if="groupEditor.active&&!groupEditor.id" v-model:name="groupEditor.name" :busy="busy==='group-edit'" :error="groupEditor.error" @save="saveInlineGroup" @cancel="cancelGroupEdit"/>
+              <template v-for="section in navigationSections" :key="section.id">
+                <InlineGroupEditor v-if="section.id&&groupEditor.active&&groupEditor.id===section.id" v-model:name="groupEditor.name" :busy="busy==='group-edit'" :error="groupEditor.error" @save="saveInlineGroup" @cancel="cancelGroupEdit"/>
+                <button v-if="section.id&&!(groupEditor.active&&groupEditor.id===section.id)" class="tree-row tree-group" :class="{selected:selectedGroupID===section.id&&!selectedID,'drop-target':dropTarget===section.id}" @dragover.stop="overConnectionTarget($event,section.id)" @dragleave.stop="leaveConnectionTarget($event,section.id)" @drop.stop="dropConnection($event,section.id)" role="treeitem" :aria-expanded="section.profiles.length?expandedGroups.has(section.id):undefined" :aria-selected="selectedGroupID===section.id&&!selectedID" data-tree-row @click="selectConnectionGroup(section.id)" @dblclick="toggleGroup(section.id)" @contextmenu.prevent.stop="contextForGroup($event,section.id)" @keydown="treeKeys" @keydown.enter.prevent="toggleGroup(section.id)" @keydown.right.prevent="expandedGroups.add(section.id)" @keydown.left.prevent="expandedGroups.delete(section.id)"><span v-if="section.profiles.length" class="tree-expander" @click.stop="toggleGroup(section.id)"><ChevronDown v-if="expandedGroups.has(section.id)" :size="12"/><ChevronRight v-else :size="12"/></span><span v-else class="tree-expander" aria-hidden="true"></span><Folder :size="16" class="folder-icon"/><span class="tree-label">{{section.name}}</span></button>
+                <div v-if="!section.id||expandedGroups.has(section.id)" :class="{'group-members':!!section.id}" role="group">
+              <template v-for="p in section.profiles" :key="p.id">
+                <button class="tree-row tree-connection" :draggable="!busy&&!loading&&!dialogOpen&&!groupDialogOpen&&!groupEditor.active" @dragstart.stop="startConnectionDrag($event,p)" @dragend.stop="endConnectionDrag" :class="{dragging:draggedConnectionID===p.id,selected:selectedID===p.id&&!selectedDatabase&&!selectedRow?.database,connected:!!sessions[p.id]}" role="treeitem" :aria-expanded="connectionHasDatabases(p.id)?expandedConnections.has(p.id):undefined" :aria-selected="selectedID===p.id&&!selectedDatabase" data-tree-row :title="p.name+' · '+address(p)" @click="selectProfile(p)" @dblclick="toggleConnection(p)" @contextmenu.prevent.stop="contextFor($event,p)" @keydown="treeKeys" @keydown.enter.prevent="openConnection(p)" @keydown.right.prevent="expandedConnections.has(p.id)||toggleConnection(p)" @keydown.left.prevent="expandedConnections.delete(p.id)"><span v-if="connectionHasDatabases(p.id)" class="tree-expander" @click.stop="toggleConnection(p)"><ChevronDown v-if="expandedConnections.has(p.id)" :size="12"/><ChevronRight v-else :size="12"/></span><span v-else class="tree-expander" aria-hidden="true"></span><Plug :size="16"/><span class="tree-label">{{p.name}}</span><LoaderCircle v-if="(busy==='connect'&&selectedID===p.id)||movingConnectionID===p.id" :size="12" class="spin"/></button>
+                <div v-if="expandedConnections.has(p.id)&&connectionHasDatabases(p.id)" role="group">
+                  <template v-for="db in visibleDatabases(p)" :key="db">
+                    <button class="tree-row tree-database" :class="{selected:selectedID===p.id&&!selectedDatabase&&selectedRow?.database===db}" role="treeitem" :aria-expanded="databaseIsOpen(p.id,db)?expandedDatabases.has(p.id+'/'+db):undefined" :aria-selected="selectedID===p.id&&!selectedDatabase&&selectedRow?.database===db" data-tree-row :title="db" @click="selectDatabaseInfo(p,db)" @dblclick="selectDatabase(p,db)" @keydown="treeKeys" @keydown.enter.prevent="selectDatabase(p,db)" @keydown.right.prevent="selectDatabase(p,db)" @keydown.left.prevent="expandedDatabases.delete(p.id+'/'+db)"><span v-if="databaseIsOpen(p.id,db)" class="tree-expander" @click.stop="toggleDatabase(p,db)"><ChevronDown v-if="expandedDatabases.has(p.id+'/'+db)" :size="12"/><ChevronRight v-else :size="12"/></span><span v-else class="tree-expander" aria-hidden="true"></span><Database :size="15" :class="databaseIconClass(p.id,db)"/><span class="tree-label">{{db}}</span></button>
+                    <div v-if="databaseIsOpen(p.id,db)&&expandedDatabases.has(p.id+'/'+db)" role="group"><button v-for="c in categories" :key="c[0]" class="tree-row tree-category" :class="{selected:selectedID===p.id&&selectedDatabase===db&&category===c[0]}" role="treeitem" :aria-selected="selectedID===p.id&&selectedDatabase===db&&category===c[0]" data-tree-row @click="selectDatabase(p,db,c[0])" @keydown="treeKeys" @keydown.enter.prevent="selectDatabase(p,db,c[0])"><component :is="c[2]" :size="15" :class="'category-'+c[0]"/><span>{{c[1]}}</span></button></div>
+                  </template>
+                  <p v-if="sessions[p.id].databases.length===0" class="tree-caption">没有可访问的数据库</p>
+                </div>
+              </template>
+                </div></template>
+              <p v-if="loading" class="tree-caption">正在读取连接…</p><p v-else-if="filteredProfiles.length===0&&profiles.length>0" class="tree-caption">没有匹配的连接</p>
+            </div>
           </div>
-          <footer class="editor-footer" v-if="mode==='editor'"><button class="button" @click="test" :disabled="!!busy||!desktop||!!fatalError"><LoaderCircle v-if="busy==='test'" :size="15" class="spin"/><Play v-else :size="14"/>{{busy==='test'?'正在测试…':'测试连接'}}</button><div class="footer-right"><button class="button quiet" @click="cancelEdit" :disabled="!!busy">取消</button><button class="button" @click="save()" :disabled="!!busy||!desktop||!!fatalError"><Save :size="15"/>保存连接</button><button class="button primary" @click="connect" :disabled="!!busy||!desktop||!!fatalError"><LoaderCircle v-if="busy==='connect'||busy==='save'" :size="15" class="spin"/><Plug v-else :size="15"/>保存并连接</button></div></footer>
-          <footer class="overview-footer" v-else><ShieldCheck :size="14"/>配置仅保存在本机<button class="text-button" @click="test" :disabled="!!busy"><LoaderCircle v-if="busy==='test'" :size="13" class="spin"/><Play v-else :size="13"/>测试连接</button></footer>
-        </template>
-      </main>
+          <div v-if="draggedConnection?.groupId" class="tree-root-drop-zone" :class="{'drop-target':dropTarget===''}" @dragover.stop="overConnectionTarget($event,'')" @dragleave.stop="leaveConnectionTarget($event,'')" @drop.stop="dropConnection($event,'')">移回“我的连接”</div>
+          <div class="navigation-filter"><Search :size="12"/><input v-model="search" aria-label="搜索连接" placeholder="搜索"/><button v-if="search" class="tiny-button" @click="search=''" aria-label="清空连接搜索"><X :size="12"/></button><select v-model="group" aria-label="按环境筛选连接" title="按环境筛选连接"><option v-for="g in groups" :key="g.id" :value="g.id">{{g.label}}</option></select></div>
+        </aside>
+        <div v-if="showSidebar" class="pane-splitter" role="separator" aria-label="调整导航窗格宽度" aria-orientation="vertical" tabindex="0" :aria-valuenow="leftWidth" aria-valuemin="170" aria-valuemax="400" @pointerdown="startResize($event,'left')" @keydown="resizeKeys($event,'left')"></div>
+        <main class="object-pane">
+          <div class="object-tabs"><button class="object-tab" role="tab" aria-selected="true"><FolderOpen :size="14"/>对象</button><div class="object-location"><span v-if="selectedConnectionGroup">{{selectedConnectionGroup.name}}</span><ChevronRight v-if="selectedConnectionGroup&&selected" :size="11"/><span v-if="selected">{{selected.name}}</span><ChevronRight v-if="selectedDatabase" :size="11"/><span v-if="selectedDatabase">{{selectedDatabase}}</span></div><button class="tiny-button info-toggle" :class="{pressed:showInformation}" aria-label="切换信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><Info :size="14"/></button></div>
+          <div class="object-toolbar" role="toolbar" aria-label="对象工具栏"><button :disabled="!selectedRow" @click="showInformation=true"><Info :size="14"/>查看信息</button><button @click="edit" :disabled="!selected||!!busy"><Pencil :size="13"/>编辑连接</button><button @click="create" :disabled="!!busy||!!fatalError"><Plus :size="14" class="add-color"/>新建连接</button><button @click="disconnect" :disabled="!live||!!busy"><Unplug :size="14"/>关闭连接</button><button @click="refresh" :disabled="!live||!!busy||objectsLoading"><RefreshCw :size="13" :class="{spin:objectsLoading||busy==='refresh'}"/>刷新</button><div class="object-search"><Search :size="12"/><input v-model="objectSearch" aria-label="筛选对象" placeholder="筛选"/></div></div>
+          <div v-if="objectsError" class="objects-error" role="alert"><AlertCircle :size="15"/>{{objectsError}}<button class="tiny-button" aria-label="关闭错误提示" @click="objectsError=''"><X :size="13"/></button></div>
+          <div class="object-list-scroll" :aria-busy="objectsLoading">
+            <table v-if="viewMode==='details'" class="object-table" aria-label="数据库对象列表"><thead><tr><th v-for="column in columns" :key="column" :title="column==='行'?'MySQL 提供的估计行数':undefined">{{column}}</th></tr></thead><tbody><tr v-for="row in workspaceRows" :key="row.key" :class="{selected:row.key===selectedRowKey}" tabindex="0" :aria-selected="row.key===selectedRowKey" @click="selectWorkspaceRow(row)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)" @keydown.space.prevent="selectedRowKey=row.key"><td class="object-name"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="15" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></td><template v-if="selectedDatabase&&(category==='tables'||category==='views')"><td class="numeric">{{row.object?.autoIncrement||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td class="numeric">{{bytesText(row.object?.dataLength??'')}}</td><td>{{row.object?.engine||''}}</td><td class="numeric" title="服务器提供的估计行数">{{row.object?.rows||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selectedDatabase"><td>{{row.object?.engine||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td>{{row.object?.createdAt||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selected"><td>数据库</td></template><template v-else><td>{{row.profile?.host}}</td><td>{{row.profile?.port}}</td><td>{{row.profile?.username}}</td><td>{{envName(row.profile?.environment??'')}}</td><td>{{row.profile&&sessions[row.profile.id]?'已打开':'已关闭'}}</td></template></tr></tbody></table>
+            <div v-else class="object-icon-grid"><button v-for="row in workspaceRows" :key="row.key" :class="{selected:row.key===selectedRowKey}" @click="selectWorkspaceRow(row)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="28" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></button></div>
+            <div v-if="objectsLoading" class="object-empty" role="status"><LoaderCircle :size="20" class="spin"/><span>正在读取{{categoryName}}…</span></div><div v-else-if="workspaceRows.length===0" class="object-empty"><span v-if="objectSearch">没有匹配的对象</span><template v-else-if="!selected"><span>{{selectedGroupID?'此组还没有连接，可新建连接或将已有连接移入此组。':'请选择左侧连接，或新建一个 MySQL 连接。'}}</span><button class="link-button" @click="create" :disabled="!!fatalError">新建连接</button></template><span v-else-if="!live">双击左侧连接以打开服务器。</span><span v-else>{{selectedDatabase?'此数据库中没有可见的'+categoryName:'没有可访问的数据库'}}</span></div>
+          </div>
+          <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
+        </main>
+        <div v-if="showInformation" class="pane-splitter" role="separator" aria-label="调整信息窗格宽度" aria-orientation="vertical" tabindex="0" :aria-valuenow="rightWidth" aria-valuemin="180" aria-valuemax="360" @pointerdown="startResize($event,'right')" @keydown="resizeKeys($event,'right')"></div>
+        <aside v-if="showInformation" class="information-pane" :style="{width:rightWidth+'px'}" aria-label="对象信息"><div class="information-tabs"><button :class="{active:informationTab==='info'}" @click="informationTab='info'">信息</button><button v-if="canShowDDL" :class="{active:informationTab==='ddl'}" @click="showDDL">DDL</button><button class="tiny-button" aria-label="关闭信息窗格" @click="showInformation=false"><X :size="12"/></button></div><div v-if="informationTab==='ddl'&&canShowDDL" class="ddl-panel"><span v-if="ddlLoading" role="status">正在读取表定义…</span><p v-else-if="ddlError" role="alert">{{ddlError}}</p><template v-else><button class="link-button" @click="copyText(ddlText)" :disabled="!ddlText">复制表定义</button><pre>{{ddlText}}</pre></template></div><div v-else class="information-scroll"><div v-if="selected||selectedRow" class="information-heading"><component :is="selectedObject?Table2:selectedDatabase||selectedRow?.database?Database:Plug" :size="48" :class="selectedObject?'category-tables':selectedDatabase||selectedRow?.database?databaseIconClass(selectedID,selectedDatabase||selectedRow?.database||''):'database-icon'"/><div><strong>{{informationName||selected?.name}}</strong><small>{{selectedObject?categoryName:selectedDatabase||selectedRow?.database?'数据库':'MySQL 连接'}}</small></div></div><div v-else class="information-placeholder"><Info :size="22"/><p>选择一个连接或对象<br/>查看详细信息</p></div><div v-if="selectedObject" class="information-context"><span><Plug :size="13"/><span>{{selected?.name}}</span></span><span><Database :size="13"/><span>{{selectedDatabase}}</span></span></div><dl v-if="selected||selectedRow" class="information-details"><template v-if="selectedObject"><dt>行</dt><dd>{{selectedObject.rows||'—'}}<small v-if="selectedObject.rows">估计值</small></dd><dt>引擎</dt><dd>{{selectedObject.engine||'—'}}</dd><dt>自动递增值</dt><dd>{{selectedObject.autoIncrement||'—'}}</dd><dt>创建日期</dt><dd>{{selectedObject.createdAt||'—'}}</dd><dt>修改日期</dt><dd>{{selectedObject.modifiedAt||'—'}}</dd><dt>数据长度</dt><dd>{{bytesText(selectedObject.dataLength)}}</dd><dt>索引长度</dt><dd>{{bytesText(selectedObject.indexLength)}}</dd><dt>注释</dt><dd>{{selectedObject.comment||'—'}}</dd></template><template v-else-if="selectedDatabase||selectedRow?.database"><dt>数据库</dt><dd>{{selectedDatabase||selectedRow?.database}}</dd><dt>连接</dt><dd>{{selected?.name}}</dd><dt>服务器版本</dt><dd>{{live?.serverVersion||'—'}}</dd><dt>当前账户</dt><dd>{{live?.currentUser||'—'}}</dd><template v-if="selectedDatabase"><dt>对象分类</dt><dd>{{categoryName}}</dd><dt>已列出的对象</dt><dd>{{objects.length}}</dd></template></template><template v-else><dt>主机</dt><dd>{{(selected||selectedRow?.profile)?.host}}</dd><dt>端口</dt><dd>{{(selected||selectedRow?.profile)?.port}}</dd><dt>用户名</dt><dd>{{(selected||selectedRow?.profile)?.username}}</dd><dt>环境</dt><dd>{{envName((selected||selectedRow?.profile)?.environment??'')}}</dd><dt>状态</dt><dd>{{live?'已打开':'已关闭'}}</dd><dt>服务器版本</dt><dd>{{live?.serverVersion||'—'}}</dd><dt>密码保存</dt><dd>{{(selected||selectedRow?.profile)?.hasPassword?'系统凭据库':'不保存'}}</dd><dt>修改日期</dt><dd>{{dateText((selected||selectedRow?.profile)?.updatedAt??'')}}</dd><dt>备注</dt><dd>{{(selected||selectedRow?.profile)?.notes||'—'}}</dd></template></dl></div></aside>
+      </div>
+      <footer class="application-statusbar"><span>{{selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span class="status-context" v-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
-    <div class="app-statusbar"><span><span class="status-dot" :class="{'is-online':desktop}"></span>{{desktop?'本地桌面应用':'浏览器预览'}}</span><span>MySQL<span class="status-separator">/</span>连接管理</span><span class="statusbar-right" :title="configPath"><ShieldCheck :size="12"/>本机存储</span></div>
-    <Transition name="toast"><div v-if="message" class="toast-message" :class="messageKind" role="status"><AlertCircle v-if="messageKind==='error'" :size="18"/><CheckCircle2 v-else :size="18"/><span>{{message}}</span><button class="icon-button" aria-label="关闭提示" @click="message=''"><X :size="14"/></button></div></Transition>
-    <div v-if="modal.open" class="modal-backdrop" @click.self="modal.open=false" @keydown.tab="trapDialog"><section class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-body"><span class="modal-icon"><AlertCircle :size="22"/></span><h2 id="dialog-title">{{modal.title}}</h2><p id="dialog-body">{{modal.body}}</p><div class="modal-actions"><button class="button" data-modal-cancel @click="modal.open=false">取消</button><button class="button" :class="modal.danger?'danger':'primary'" @click="acceptModal">{{modal.label}}</button></div></section></div>
+    <ConnectionDialog v-if="dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
+    <GroupDialog v-if="groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
+    <div v-if="contextMenu.open" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>
+    <div v-if="confirm.open" class="confirmation-overlay" @keydown.tab="trap"><section class="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-text"><header><AlertCircle :size="16"/><h2 id="confirmation-title">{{confirm.title}}</h2></header><p id="confirmation-text">{{confirm.body}}</p><footer><button class="native-button" data-confirm-cancel @click="cancelConfirm">取消</button><button class="native-button default-button" @click="acceptConfirm">{{confirm.label}}</button></footer></section></div>
+    <div v-if="about" class="confirmation-overlay" @keydown.tab="trap"><section class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title"><img :src="APP_ICON" alt="" width="52" height="52"/><h2 id="about-title">Bajiu DB · 捌玖</h2><p>版本 {{appVersion}}</p><p>MySQL 连接与数据库对象浏览工具</p><button class="native-button default-button" data-about-close @click="about=false">确定</button></section></div>
   </div>
 </template>
-

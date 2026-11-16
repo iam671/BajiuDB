@@ -24,9 +24,15 @@ type Dialer interface {
 	Open(context.Context, Input, string) (Database, error)
 }
 type MySQLDialer struct{}
-type mysqlDatabase struct{ db *sql.DB }
+type mysqlDatabase struct {
+	db          *sql.DB
+	closeTunnel func() error
+}
 
 func (MySQLDialer) Open(ctx context.Context, in Input, password string) (Database, error) {
+	if in.TunnelMode == "http" {
+		return newHTTPDatabase(in, password)
+	}
 	cfg := mysql.NewConfig()
 	cfg.Net = "tcp"
 	cfg.Addr = net.JoinHostPort(in.Host, strconv.Itoa(in.Port))
@@ -68,8 +74,35 @@ func (MySQLDialer) Open(ctx context.Context, in Input, password string) (Databas
 		}
 		cfg.TLS = t
 	}
+	var closeTunnel func() error
+	if in.TunnelMode == "ssh" {
+		client, err := sshTunnel(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		closeTunnel = client.Close
+		cfg.DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			remote, err := client.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			// SSH channels do not support deadlines. A pipe preserves the driver's
+			// read/write timeouts and closes the SSH channel when the driver closes.
+			local, bridge := net.Pipe()
+			go func() {
+				defer bridge.Close()
+				defer remote.Close()
+				go func() { _, _ = io.Copy(remote, bridge); remote.Close() }()
+				_, _ = io.Copy(bridge, remote)
+			}()
+			return local, nil
+		}
+	}
 	c, err := mysql.NewConnector(cfg)
 	if err != nil {
+		if closeTunnel != nil {
+			_ = closeTunnel()
+		}
 		return nil, errors.New("无法创建 MySQL 连接，请检查配置")
 	}
 	db := sql.OpenDB(c)
@@ -79,9 +112,12 @@ func (MySQLDialer) Open(ctx context.Context, in Input, password string) (Databas
 	db.SetConnMaxLifetime(30 * time.Minute)
 	if err = db.PingContext(ctx); err != nil {
 		db.Close()
+		if closeTunnel != nil {
+			_ = closeTunnel()
+		}
 		return nil, explainMySQL(err)
 	}
-	return &mysqlDatabase{db: db}, nil
+	return &mysqlDatabase{db: db, closeTunnel: closeTunnel}, nil
 }
 
 func (d *mysqlDatabase) Info(ctx context.Context) (SessionInfo, error) {
@@ -107,7 +143,13 @@ func (d *mysqlDatabase) Info(ctx context.Context) (SessionInfo, error) {
 	return info, nil
 }
 
-func (d *mysqlDatabase) Close() error { return d.db.Close() }
+func (d *mysqlDatabase) Close() error {
+	err := d.db.Close()
+	if d.closeTunnel != nil {
+		_ = d.closeTunnel()
+	}
+	return err
+}
 
 func explainMySQL(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -78,7 +78,52 @@ func (a *App) RefreshDatabases(id string) (connections.SessionInfo, error) {
 	}
 	return a.service.Refresh(id)
 }
+func (a *App) ListObjects(id, database, kind string) (connections.ObjectList, error) {
+	if a.startupErr != nil {
+		return connections.ObjectList{}, a.startupErr
+	}
+	return a.service.Objects(id, database, kind)
+}
 func (a *App) ConfigPath() string { return a.configPath }
+func (a *App) TableDDL(id, database, table string) (string, error) {
+	if a.startupErr != nil {
+		return "", a.startupErr
+	}
+	return a.service.TableDDL(id, database, table)
+}
+func (a *App) SelectSSHKey() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择 SSH 私钥", Filters: []runtime.FileFilter{{DisplayName: "SSH 私钥", Pattern: "*"}}})
+}
+func (a *App) ListGroups() ([]connections.Group, error) {
+	if a.startupErr != nil {
+		return nil, a.startupErr
+	}
+	return a.service.Groups()
+}
+func (a *App) SaveGroup(id, name string) (connections.Group, error) {
+	if a.startupErr != nil {
+		return connections.Group{}, a.startupErr
+	}
+	return a.service.SaveGroup(id, name)
+}
+func (a *App) MoveConnectionToGroup(id string, revision int, groupID string) (connections.Profile, error) {
+	if a.startupErr != nil {
+		return connections.Profile{}, a.startupErr
+	}
+	return a.service.MoveToGroup(id, revision, groupID)
+}
+func (a *App) DisconnectAll() {
+	if a.service != nil {
+		a.service.DisconnectAll()
+	}
+}
+func (a *App) DeleteGroup(id string) error {
+	if a.startupErr != nil {
+		return a.startupErr
+	}
+	return a.service.DeleteGroup(id)
+}
+func (a *App) QuitApp() { runtime.Quit(a.ctx) }
 func (a *App) SelectCAFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择 CA 证书", Filters: []runtime.FileFilter{{DisplayName: "PEM 证书", Pattern: "*.pem;*.crt;*.cer"}}})
 }

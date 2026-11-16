@@ -13,7 +13,25 @@ import (
 
 type memoryRepo struct {
 	records []Record
+	groups  []Group
 	fail    bool
+}
+
+func (r *memoryRepo) LoadGroups() ([]Group, error) { return append([]Group{}, r.groups...), nil }
+func (r *memoryRepo) SaveGroups(groups []Group) error {
+	if r.fail {
+		return errors.New("disk full")
+	}
+	r.groups = append([]Group{}, groups...)
+	return nil
+}
+func (r *memoryRepo) SaveWorkspace(records []Record, groups []Group) error {
+	if r.fail {
+		return errors.New("disk full")
+	}
+	r.records = append([]Record{}, records...)
+	r.groups = append([]Group{}, groups...)
+	return nil
 }
 
 func (r *memoryRepo) Load() ([]Record, error) { return append([]Record{}, r.records...), nil }
@@ -47,9 +65,69 @@ func (s *memorySecrets) Set(key, value string) error {
 func (s *memorySecrets) Delete(key string) error { delete(s.values, key); return nil }
 
 type fakeDB struct {
-	mu     sync.Mutex
-	closed bool
-	fail   bool
+	mu             sync.Mutex
+	closed         bool
+	fail           bool
+	objectCalls    int
+	objectsEntered chan struct{}
+	objectsRelease chan struct{}
+}
+
+func (d *fakeDB) Objects(_ context.Context, database, kind string) (ObjectList, error) {
+	d.objectCalls++
+	if d.objectsEntered != nil {
+		close(d.objectsEntered)
+		<-d.objectsRelease
+	}
+	return ObjectList{Objects: []DatabaseObject{{Name: "customers", Kind: kind, Rows: "9007199254740993"}}}, nil
+}
+
+func TestObjectsRequiresAccessibleDatabaseAndLiveSession(t *testing.T) {
+	s, _, _, dial := fixture()
+	defer s.Close()
+	p, err := s.Save(validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Objects(p.ID, "test_db", "tables"); err == nil {
+		t.Fatal("disconnected session accepted")
+	}
+	if _, err = s.Connect(Input{Profile: p, PasswordAction: "keep"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range [][2]string{{"other_db", "tables"}, {"test_db' OR 1=1 --", "tables"}, {"test_db", "sql"}, {"", "tables"}} {
+		if _, err = s.Objects(p.ID, request[0], request[1]); err == nil {
+			t.Fatal("invalid metadata request accepted", request)
+		}
+	}
+	if dial.db.objectCalls != 0 {
+		t.Fatal("invalid request reached database")
+	}
+	result, err := s.Objects(p.ID, "test_db", "tables")
+	if err != nil || len(result.Objects) != 1 || result.Objects[0].Rows != "9007199254740993" {
+		t.Fatal("metadata lost", result, err)
+	}
+}
+
+func TestObjectsRejectsResponseAfterDisconnect(t *testing.T) {
+	s, _, _, dial := fixture()
+	defer s.Close()
+	p, err := s.Save(validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Connect(Input{Profile: p, PasswordAction: "keep"}); err != nil {
+		t.Fatal(err)
+	}
+	dial.db.objectsEntered, dial.db.objectsRelease = make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() { _, err := s.Objects(p.ID, "test_db", "tables"); done <- err }()
+	<-dial.db.objectsEntered
+	s.Disconnect(p.ID)
+	close(dial.db.objectsRelease)
+	if err = <-done; err == nil {
+		t.Fatal("stale metadata accepted")
+	}
 }
 
 func (d *fakeDB) Info(context.Context) (SessionInfo, error) {
@@ -62,12 +140,14 @@ func (d *fakeDB) Close() error { d.mu.Lock(); defer d.mu.Unlock(); d.closed = tr
 
 type fakeDialer struct {
 	db       *fakeDB
+	input    Input
 	password string
 	entered  chan struct{}
 	release  chan struct{}
 }
 
-func (d *fakeDialer) Open(_ context.Context, _ Input, password string) (Database, error) {
+func (d *fakeDialer) Open(_ context.Context, in Input, password string) (Database, error) {
+	d.input = in
 	d.password = password
 	if d.entered != nil {
 		close(d.entered)

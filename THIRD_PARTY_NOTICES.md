@@ -38,10 +38,8 @@ Frameworks, icons and database drivers retain their own licences. This file does
 - github.com/wailsapp/mimetype v1.4.1: licences in licenses/github.com_wailsapp_mimetype-v1.4.1/
 - github.com/wailsapp/wails/v2 v2.11.0: licences in licenses/github.com_wailsapp_wails_v2-v2.11.0/
 - github.com/zalando/go-keyring v0.2.8: licences in licenses/github.com_zalando_go-keyring-v0.2.8/
-- golang.org/x/crypto v0.33.0: licences in licenses/golang.org_x_crypto-v0.33.0/
-- golang.org/x/net v0.35.0: licences in licenses/golang.org_x_net-v0.35.0/
-- golang.org/x/sys v0.30.0: licences in licenses/golang.org_x_sys-v0.30.0/
-- golang.org/x/text v0.22.0: licences in licenses/golang.org_x_text-v0.22.0/
+- golang.org/x/crypto v0.59.0: licences in licenses/golang.org_x_crypto-v0.59.0/
+- golang.org/x/sys v0.50.0: licences in licenses/golang.org_x_sys-v0.50.0/
 - gopkg.in/yaml.v3 v3.0.1: licences in licenses/gopkg.in_yaml.v3-v3.0.1/
 
 ## Frontend runtime dependencies

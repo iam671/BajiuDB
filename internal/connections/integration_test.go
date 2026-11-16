@@ -47,6 +47,31 @@ func TestMySQLIntegration(t *testing.T) {
 	if !found {
 		t.Fatal("test database not present in accessible databases")
 	}
+	browser := db.(objectBrowser)
+	for kind, name := range map[string]string{"tables": "customers", "views": "active_customers"} {
+		result, objectErr := browser.Objects(ctx, "bajiu_test_db", kind)
+		if objectErr != nil {
+			t.Fatal(kind, objectErr)
+		}
+		present := false
+		for _, object := range result.Objects {
+			if object.Name == name && object.Kind == kind {
+				present = true
+			}
+		}
+		if !present {
+			t.Fatalf("missing %s fixture: %#v", kind, result)
+		}
+	}
+	result, err := browser.Objects(ctx, "bajiu_test_db' OR 1=1 --", "tables")
+	if err != nil || len(result.Objects) != 0 {
+		t.Fatal("schema name was not treated as a bound value", err)
+	}
+	for _, kind := range []string{"functions", "events"} {
+		if _, err = browser.Objects(ctx, "bajiu_test_db", kind); err != nil {
+			t.Fatal(kind, err)
+		}
+	}
 	_, err = (MySQLDialer{}).Open(ctx, in, "wrong-password-test-only")
 	if err == nil || !strings.Contains(err.Error(), "拒绝登录") {
 		t.Fatal("authentication error not classified", err)
