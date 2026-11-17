@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useTableResizing} from './tableResizing'
+useTableResizing()
 import {onMounted,onUnmounted,ref,watch} from 'vue'
 import {api,type WindowDialog} from './api'
 import ConnectionDialog from './ConnectionDialog.vue'

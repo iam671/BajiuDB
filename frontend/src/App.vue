@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {useTableResizing} from './tableResizing'
+useTableResizing()
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Plug, Unplug, Plus, Database, Table2, PanelsTopLeft, Braces, Users, Wrench, FileCode2, Archive, Workflow, Network, ChartNoAxesColumn, ChevronDown, ChevronRight, Folder, Search, X, RefreshCw, Pencil, Trash2, Copy, Info, List, LayoutGrid, PanelRight, SlidersHorizontal, FileText, Clock3, AlertCircle, CheckCircle2, LoaderCircle, Eye, ShieldCheck, Check, FolderOpen } from '@lucide/vue'
 import ConnectionDialog from './ConnectionDialog.vue'

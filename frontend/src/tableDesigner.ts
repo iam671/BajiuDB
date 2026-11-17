@@ -103,6 +103,7 @@ export function same(a:unknown,b:unknown){return JSON.stringify(a)===JSON.string
 function defaultExpression(value:string,mode:string){const text=fragment(value,mode);if(!text)throw new Error('默认值表达式不能为空');return /^(?:CURRENT_TIMESTAMP(?:\(\d*\))?|[-+]?\d+(?:\.\d+)?|NULL)$/i.test(text)?text:'('+text+')'}
 function fieldSQL(field:Field,mode:string,original?:Field){
  if(original&&same(field,original)&&field.raw)return field.raw
+ if(!['none','null','value','expression'].includes(field.defaultMode)||!['','VIRTUAL','STORED'].includes(field.generated))throw new Error('请选择有效的字段默认值类型和生成列方式')
  const type=field.type.toLowerCase().trim();if(!types.includes(type))throw new Error('暂不支持修改字段类型 '+field.type+'；可保留原定义或使用查询编辑器')
  let args=''
  if(field.length.trim()){
@@ -123,7 +124,7 @@ function fieldSQL(field:Field,mode:string,original?:Field){
  if(field.advanced.trim())sql+=' '+fragment(field.advanced,mode)
  return sql
 }
-function indexSQL(index:DesignIndex,mode:string){return (index.kind==='PRIMARY'?'PRIMARY KEY':(index.kind==='NORMAL'?'':index.kind+' ')+'KEY '+validName(index.name,'索引名'))+' ('+indexFields(index.fields,mode)+')'+(index.method?' USING '+(['BTREE','HASH'].includes(index.method)?index.method:keyword(index.method,'索引方法')):'')+(index.comment?' COMMENT '+quoteText(index.comment,mode):'')+(index.advanced?' '+fragment(index.advanced,mode):'')}
+function indexSQL(index:DesignIndex,mode:string){if(!['PRIMARY','NORMAL','UNIQUE','FULLTEXT','SPATIAL'].includes(index.kind))throw new Error('请选择有效的索引类型');return (index.kind==='PRIMARY'?'PRIMARY KEY':(index.kind==='NORMAL'?'':index.kind+' ')+'KEY '+validName(index.name,'索引名'))+' ('+indexFields(index.fields,mode)+')'+(index.method?' USING '+(['BTREE','HASH'].includes(index.method)?index.method:keyword(index.method,'索引方法')):'')+(index.comment?' COMMENT '+quoteText(index.comment,mode):'')+(index.advanced?' '+fragment(index.advanced,mode):'')}
 function foreignSQL(fk:DesignForeignKey){if(columnNames(fk.fields).length!==columnNames(fk.references).length)throw new Error('外键字段与引用字段数量必须相同');if(!actions.includes(fk.onDelete)||!actions.includes(fk.onUpdate))throw new Error('外键动作无效');return 'CONSTRAINT '+validName(fk.name,'外键名')+' FOREIGN KEY ('+fieldList(fk.fields)+') REFERENCES '+(fk.database?validName(fk.database,'引用数据库')+'.':'')+validName(fk.table,'引用表')+' ('+fieldList(fk.references)+')'+(fk.onDelete?' ON DELETE '+fk.onDelete:'')+(fk.onUpdate?' ON UPDATE '+fk.onUpdate:'')}
 function optionSQL(options:DesignOptions,mode:string,original?:DesignOptions){const out:string[]=[];for(const key of ['engine','charset','collation','autoIncrement','comment'] as const){if(original&&options[key]===original[key])continue;const value=options[key];if(key==='comment')out.push('COMMENT='+quoteText(value,mode));else if(value){if(key==='autoIncrement'){if(!/^\d+$/.test(value))throw new Error('自增起始值须为整数');out.push('AUTO_INCREMENT='+value)}else out.push(({engine:'ENGINE',charset:'DEFAULT CHARACTER SET',collation:'COLLATE'}[key])+'='+keyword(value,key))}}return out}
 export function designSQL(database:string,table:string,model:TableDesign,original?:TableDesign){
