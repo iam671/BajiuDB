@@ -24,6 +24,18 @@ beforeEach(()=>{
 })
 afterEach(()=>{app?.unmount();app=undefined;root.remove();delete window.go;vi.unstubAllGlobals()})
 describe('designer controls',()=>{
+ it('edits defaults in one combobox with empty-string and NULL presets',async()=>{
+  await mount();await input('字段 1 名称','title');await click('选项');await input('表名','defaults');await click('字段')
+  const control=root.querySelector<HTMLInputElement>('[aria-label="字段默认值"]')!
+  expect(control.value).toBe('');expect(root.querySelector('[aria-label="默认值类型"]')).toBeNull()
+  control.focus();await settle();expect(Array.from(root.querySelectorAll('[role=option]')).map(el=>el.textContent)).toEqual(['EMPTY STRING','NULL'])
+  ;(root.querySelector('[role=option]') as HTMLElement).dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await settle();expect(control.value).toBe('EMPTY STRING')
+  await click('SQL 预览');expect(root.querySelector('textarea')?.value).toContain("DEFAULT ''")
+  await click('字段');await input('字段默认值','NULL');await click('SQL 预览');expect(root.querySelector('textarea')?.value).toContain('DEFAULT NULL')
+  await click('字段');await input('字段默认值','custom');await click('SQL 预览');expect(root.querySelector('textarea')?.value).toContain("DEFAULT 'custom'")
+  await click('字段');await input('字段默认值','');await click('SQL 预览');expect(root.querySelector('textarea')?.value.split('\n').find(line=>line.includes('`title`'))).not.toContain(' DEFAULT ')
+  expect(commands.some(sql=>sql.includes('CREATE TABLE')||sql.includes('ALTER TABLE'))).toBe(false)
+ })
  it('inherits database defaults, allows multiline comments and saves directly without a confirmation event',async()=>{
   await mount();expect(root.querySelector<HTMLInputElement>('[aria-label="字段字符集"]')?.value).toBe('utf8mb4');expect(root.querySelector<HTMLInputElement>('[aria-label="字段排序规则"]')?.value).toBe(schema);expect(root.querySelector('select')).toBeNull();await input('字段 1 名称','title');await input('字段注释','first line\nsecond line');await click('选项');await input('表名','notes');await click('保存');expect(confirmations).toHaveLength(0);expect(saved).toEqual(['notes']);expect(commands.some(sql=>sql.includes('CREATE TABLE'))).toBe(true);expect(ddl).toContain("COMMENT 'first line\nsecond line'")
  })

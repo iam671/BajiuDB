@@ -33,6 +33,25 @@ function tokens(text:string,mode=''){
 }
 function identifier(value:string){return value.startsWith('`')?value.slice(1,-1).replace(/``/g,'`'):value}
 function unquote(value:string,mode=''){if(!value.startsWith("'")&&!value.startsWith('"'))return value;const quote=value[0]!;const text=value.slice(1,-1).split(quote+quote).join(quote);if(mode.toUpperCase().split(',').includes('NO_BACKSLASH_ESCAPES'))return text;return text.replace(/\\([0bnrtZ\\'"])/g,(_,c:string)=>({'0':'\0',b:'\b',n:'\n',r:'\r',t:'\t',Z:'\x1a'}[c]??c))}
+export function fieldDefaultInput(field:Field,mode:string){
+ if(field.defaultMode==='none')return ''
+ if(field.defaultMode==='null')return 'NULL'
+ if(field.defaultMode==='expression')return field.defaultValue
+ if(field.defaultValue==='')return 'EMPTY STRING'
+ // Quotes distinguish literal preset names and expression-looking text.
+ return /^(?:NULL|EMPTY STRING|CURRENT_TIMESTAMP(?:\(\d*\))?)$/i.test(field.defaultValue)||/^\s*[(']/.test(field.defaultValue)?quoteText(field.defaultValue,mode):field.defaultValue
+}
+export function setFieldDefaultInput(field:Field,value:string,mode:string){
+ if(value===fieldDefaultInput(field,mode))return
+ if(value===''){field.defaultMode='none';field.defaultValue='';return}
+ if(/^NULL$/i.test(value)){field.defaultMode='null';field.defaultValue='';return}
+ if(/^EMPTY STRING$/i.test(value)){field.defaultMode='value';field.defaultValue='';return}
+ if(value.startsWith("'")){
+  try{const ts=tokens(value,mode);if(ts.length===1&&ts[0]?.value===value){field.defaultMode='value';field.defaultValue=unquote(value,mode);return}}catch{/* Keep unfinished text editable. */}
+ }
+ field.defaultMode=/^CURRENT_TIMESTAMP(?:\(\d*\))?$/i.test(value)||value.startsWith('(')&&value.endsWith(')')?'expression':'value'
+ field.defaultValue=value
+}
 export function convertSQLStrings(sql:string,from:string,to:string){let out=sql;const ansi=from.toUpperCase().split(',').includes('ANSI_QUOTES');for(const token of tokens(sql,from).reverse()){if(token.value.startsWith("'")||token.value.startsWith('"')&&!ansi)out=out.slice(0,token.start)+quoteText(unquote(token.value,from),to)+out.slice(token.end)}return out}
 function split(text:string,mode=''){const ts=tokens(text,mode),parts:string[]=[];let start=0;for(const t of ts)if(t.value===','&&t.depth===0){parts.push(text.slice(start,t.start).trim());start=t.end}parts.push(text.slice(start).trim());return parts.filter(Boolean)}
 export function fragment(value:string,mode=''){const ts=tokens(value,mode);if(ts.some((t,i)=>!t.quoted&&(t.value===';'||t.value==='#'||t.value==='-'&&ts[i+1]?.value==='-'&&ts[i+1]?.start===t.end)||t.value.startsWith('/*'))||/(?:^|\n)\s*DELIMITER\b/i.test(value))throw new Error('表达式不能包含语句分隔符或注释');return value.trim()}

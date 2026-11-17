@@ -1,8 +1,24 @@
 import {describe,it,expect} from 'vitest'
-import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid} from './tableDesigner'
+import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid,fieldDefaultInput,setFieldDefaultInput} from './tableDesigner'
 const fixture="CREATE TABLE `items` (\n `id` bigint unsigned NOT NULL AUTO_INCREMENT,\n `title` varchar(80) NOT NULL DEFAULT 'O''Brien' COMMENT 'name',\n `calc` int GENERATED ALWAYS AS ((length(`title`) + 1)) VIRTUAL,\n PRIMARY KEY (`id`),\n KEY `idx_title` (`title`(20)) COMMENT 'prefix',\n CONSTRAINT `check_title` CHECK ((length(`title`) > 0))\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='table'"
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v))
 describe('table designer SQL',()=>{
+ it('distinguishes cleared defaults, empty strings, NULL and exact typed values',()=>{
+  const draft=newDesign(),field=draft.fields[0]!;field.name='value'
+  for(const [input,expected] of [['EMPTY STRING',"DEFAULT ''"],['NULL','DEFAULT NULL'],['9007199254740993.125',"DEFAULT '9007199254740993.125'"],["O'Brien\\path", "DEFAULT 'O''Brien\\\\path'"],["'NULL'","DEFAULT 'NULL'"]]){
+   setFieldDefaultInput(field,input!,'');expect(designSQL('qa','defaults',draft)).toContain(expected!);expect(fieldDefaultInput(field,'')).toBe(input)
+  }
+  setFieldDefaultInput(field,'','');expect(field.defaultMode).toBe('none');expect(designSQL('qa','defaults',draft).split('\n')[1]).not.toContain(' DEFAULT ')
+ })
+ it('preserves existing defaults on display and supports explicit expressions and mode-aware literal input',()=>{
+  const original=parseDesign("CREATE TABLE `items` (`created` timestamp DEFAULT CURRENT_TIMESTAMP(3), `literal` varchar(80) DEFAULT 'NULL')"),draft=clone(original)
+  for(const field of draft.fields)setFieldDefaultInput(field,fieldDefaultInput(field,draft.sqlMode),draft.sqlMode)
+  expect(designSQL('qa','items',draft,original)).toBe('')
+  const field=draft.fields[0]!
+  setFieldDefaultInput(field,'(1); DROP TABLE x; (2)','');expect(()=>designSQL('qa','items',draft,original)).toThrow()
+  setFieldDefaultInput(field,'CURRENT_TIMESTAMP','');expect(designSQL('qa','items',draft,original)).toContain('DEFAULT CURRENT_TIMESTAMP')
+  setFieldDefaultInput(field,"'C:\\path'",'NO_BACKSLASH_ESCAPES');expect(field.defaultValue).toBe('C:\\path')
+ })
  it('preserves nested generated expressions, literal commas and checks without inventing changes',()=>{const original=parseDesign(fixture);expect(original.fields[2]?.expression).toBe('(length(`title`) + 1)');expect(original.other).toHaveLength(1);expect(designSQL('qa','items',clone(original),original)).toBe('')})
  it('alters only edited columns and leaves independent constraints and generated columns alone',()=>{const original=parseDesign(fixture),draft=clone(original);draft.fields[1]!.length='160';const sql=designSQL('qa','items',draft,original);expect(sql).toContain('MODIFY COLUMN `title` VARCHAR(160)');expect(sql).toContain("DEFAULT 'O''Brien'");expect(sql).not.toContain('DROP');expect(sql).not.toContain('`calc`')})
  it('uses original names for rename and SQL identifiers for references',()=>{const original=parseDesign(fixture),draft=clone(original);draft.fields[1]!.name='display`title';const sql=designSQL('qa','items',draft,original);expect(sql).toContain('CHANGE COLUMN `title` `display``title`');expect(renameReferences('`title`(20) DESC, `id`','title','display`title')).toBe('`display``title`(20) DESC, `id`')})
