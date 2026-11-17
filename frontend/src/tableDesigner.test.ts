@@ -3,6 +3,19 @@ import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,ren
 const fixture="CREATE TABLE `items` (\n `id` bigint unsigned NOT NULL AUTO_INCREMENT,\n `title` varchar(80) NOT NULL DEFAULT 'O''Brien' COMMENT 'name',\n `calc` int GENERATED ALWAYS AS ((length(`title`) + 1)) VIRTUAL,\n PRIMARY KEY (`id`),\n KEY `idx_title` (`title`(20)) COMMENT 'prefix',\n CONSTRAINT `check_title` CHECK ((length(`title`) > 0))\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='table'"
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v))
 describe('table designer SQL',()=>{
+ it('reads and removes timestamp auto-update without losing precision or other attributes',()=>{
+  const original=parseDesign("CREATE TABLE `items` (`changed` timestamp(3) NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'time')"),draft=clone(original),field=draft.fields[0]!
+  expect(field.onUpdate.toUpperCase()).toBe('CURRENT_TIMESTAMP(3)');expect(field.advanced).toBe('');expect(designSQL('qa','items',draft,original)).toBe('')
+  field.comment='updated';expect(designSQL('qa','items',draft,original)).toContain('ON UPDATE CURRENT_TIMESTAMP(3)')
+  field.length='6';const sql=designSQL('qa','items',draft,original);expect(sql).toContain('TIMESTAMP(6) NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)')
+  field.onUpdate='';expect(designSQL('qa','items',draft,original)).not.toContain('ON UPDATE')
+ })
+ it('generates numeric zero fill and rejects timestamp updating for other or generated types',()=>{
+  const draft=newDesign(),field=draft.fields[0]!;Object.assign(field,{name:'id',type:'int',length:'8',unsigned:true,zeroFill:true});expect(designSQL('qa','items',draft)).toContain('INT(8) UNSIGNED ZEROFILL')
+  field.onUpdate='CURRENT_TIMESTAMP';expect(()=>designSQL('qa','items',draft)).toThrow('TIMESTAMP/DATETIME')
+  Object.assign(field,{type:'datetime',length:'7'});expect(()=>designSQL('qa','items',draft)).toThrow('时间精度')
+  Object.assign(field,{length:'3',generated:'VIRTUAL',expression:'NOW()'});expect(()=>designSQL('qa','items',draft)).toThrow('TIMESTAMP/DATETIME')
+ })
  it('distinguishes cleared defaults, empty strings, NULL and exact typed values',()=>{
   const draft=newDesign(),field=draft.fields[0]!;field.name='value'
   for(const [input,expected] of [['EMPTY STRING',"DEFAULT ''"],['NULL','DEFAULT NULL'],['9007199254740993.125',"DEFAULT '9007199254740993.125'"],["O'Brien\\path", "DEFAULT 'O''Brien\\\\path'"],["'NULL'","DEFAULT 'NULL'"]]){

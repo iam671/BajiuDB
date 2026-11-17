@@ -24,6 +24,19 @@ beforeEach(()=>{
 })
 afterEach(()=>{app?.unmount();app=undefined;root.remove();delete window.go;vi.unstubAllGlobals()})
 describe('designer controls',()=>{
+ it('shows type-specific properties, retains comments and clears incompatible attributes on type changes',async()=>{
+  await mount();await input('字段 1 名称','value');await click('选项');await input('表名','typed');await click('字段')
+  const checkbox=(text:string)=>Array.from(root.querySelectorAll<HTMLLabelElement>('.native-check')).find(label=>label.textContent?.trim()===text)?.querySelector<HTMLInputElement>('input')
+  expect(checkbox('自动递增')).toBeUndefined();expect(root.querySelector('[aria-label="字段字符集"]')).not.toBeNull()
+  await input('字段 1 类型','int');expect(checkbox('自动递增')).toBeDefined();expect(checkbox('填充零')).toBeDefined();expect(root.querySelector('[aria-label="字段字符集"]')).toBeNull()
+  checkbox('填充零')!.click();await settle();expect(checkbox('无符号')!.checked).toBe(true)
+  checkbox('自动递增')!.click();await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="字段默认值"]')!.disabled).toBe(true)
+  await input('字段 1 类型','timestamp');expect(checkbox('自动递增')).toBeUndefined();expect(checkbox('根据当前时间戳更新')).toBeDefined();checkbox('根据当前时间戳更新')!.click();await settle()
+  await input('字段默认值','CURRENT_TIMESTAMP');await input('value长度','3');await input('字段注释','all types');await click('SQL 预览');expect(root.querySelector('textarea')?.value).toContain('DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)');expect(root.querySelector('textarea')?.value).not.toMatch(/UNSIGNED|ZEROFILL|AUTO_INCREMENT/)
+  await click('字段');await input('字段 1 类型','date');expect(checkbox('根据当前时间戳更新')).toBeUndefined();expect(root.querySelector<HTMLTextAreaElement>('[aria-label="字段注释"]')!.value).toBe('all types')
+  await input('字段 1 类型','varchar');expect(root.querySelector('[aria-label="字段字符集"]')).not.toBeNull();expect(checkbox('填充零')).toBeUndefined()
+  expect(commands.some(sql=>sql.includes('CREATE TABLE')||sql.includes('ALTER TABLE'))).toBe(false)
+ })
  it('edits defaults in one combobox with empty-string and NULL presets',async()=>{
   await mount();await input('字段 1 名称','title');await click('选项');await input('表名','defaults');await click('字段')
   const control=root.querySelector<HTMLInputElement>('[aria-label="字段默认值"]')!

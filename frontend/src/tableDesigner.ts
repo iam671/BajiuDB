@@ -1,5 +1,5 @@
 import {quoteIdentifier as qi} from './tableData'
-export type Field={id:string;name:string;type:string;length:string;decimals:string;notNull:boolean;unsigned:boolean;zeroFill?:boolean;autoIncrement:boolean;generated:''|'VIRTUAL'|'STORED';expression:string;defaultMode:'none'|'null'|'value'|'expression';defaultValue:string;comment:string;charset:string;collation:string;advanced:string;raw?:string;defaultRaw?:string;commentRaw?:string}
+export type Field={id:string;name:string;type:string;length:string;decimals:string;notNull:boolean;unsigned:boolean;zeroFill?:boolean;autoIncrement:boolean;onUpdate:string;generated:''|'VIRTUAL'|'STORED';expression:string;defaultMode:'none'|'null'|'value'|'expression';defaultValue:string;comment:string;charset:string;collation:string;advanced:string;raw?:string;defaultRaw?:string;commentRaw?:string}
 export type DesignIndex={id:string;name:string;kind:'PRIMARY'|'NORMAL'|'UNIQUE'|'FULLTEXT'|'SPATIAL';fields:string;method:string;comment:string;advanced?:string;raw?:string}
 export type DesignForeignKey={id:string;name:string;fields:string;database:string;table:string;references:string;onDelete:string;onUpdate:string;raw?:string}
 export type DesignTrigger={id:string;name:string;timing:'BEFORE'|'AFTER';event:'INSERT'|'UPDATE'|'DELETE';body:string;sourceBody?:string;raw?:string}
@@ -8,7 +8,12 @@ export type TableDesign={sqlMode:string;fields:Field[];indexes:DesignIndex[];for
 export const types=['tinyint','smallint','mediumint','int','bigint','decimal','float','double','bit','boolean','char','varchar','binary','varbinary','tinytext','text','mediumtext','longtext','tinyblob','blob','mediumblob','longblob','date','time','datetime','timestamp','year','json','enum','set','geometry','point','linestring','polygon','multipoint','multilinestring','multipolygon','geometrycollection']
 export const actions=['','RESTRICT','CASCADE','SET NULL','NO ACTION']
 export const uid=()=>crypto.randomUUID()
-export const newField=():Field=>({id:uid(),name:'',type:'varchar',length:'255',decimals:'',notNull:false,unsigned:false,autoIncrement:false,generated:'',expression:'',defaultMode:'none',defaultValue:'',comment:'',charset:'',collation:'',advanced:''})
+export const newField=():Field=>({id:uid(),name:'',type:'varchar',length:'255',decimals:'',notNull:false,unsigned:false,autoIncrement:false,onUpdate:'',generated:'',expression:'',defaultMode:'none',defaultValue:'',comment:'',charset:'',collation:'',advanced:''})
+export const numericField=(field:Field)=>/^(?:tinyint|smallint|mediumint|int|bigint|decimal|float|double|boolean)$/i.test(field.type)
+export const incrementField=(field:Field)=>/^(?:tinyint|smallint|mediumint|int|bigint|float|double|boolean)$/i.test(field.type)
+export const textField=(field:Field)=>/^(?:char|varchar|(?:tiny|medium|long)?text|enum|set)$/i.test(field.type)
+export const timestampField=(field:Field)=>/^(?:datetime|timestamp)$/i.test(field.type)
+export function currentTimestampSQL(field:Field){if(field.length&&!/^[0-6]$/.test(field.length)||field.decimals)throw new Error('时间精度须为 0–6');return 'CURRENT_TIMESTAMP'+(field.length?'('+field.length+')':'')}
 export const newDesign=():TableDesign=>({sqlMode:'',fields:[newField()],indexes:[],foreignKeys:[],triggers:[],options:{engine:'InnoDB',charset:'utf8mb4',collation:'',autoIncrement:'',comment:''},other:[]})
 export function quoteText(value:string,mode:string){const escaped=mode.toUpperCase().split(',').includes('NO_BACKSLASH_ESCAPES')?value:value.replace(/\\/g,'\\\\').replace(/\0/g,'\\0').replace(/\x1a/g,'\\Z');return "'"+escaped.replace(/'/g,"''")+"'"}
 type Token={value:string;start:number;end:number;depth:number;quoted:boolean}
@@ -80,7 +85,7 @@ function parseField(raw:string,mode:string):Field{
   else if(word==='COMMENT'){const value=nextValue();field.comment=unquote(value,mode);field.commentRaw='COMMENT '+value}
   else if(word==='CHARACTER'&&ts[i]?.value.toUpperCase()==='SET'){i++;field.charset=identifier(ts[i++]?.value??'')}
   else if(word==='COLLATE')field.collation=identifier(ts[i++]?.value??'')
-  else if(word==='ON'&&ts[i]?.value.toUpperCase()==='UPDATE'){i++;advanced.push('ON UPDATE '+nextValue())}
+  else if(word==='ON'&&ts[i]?.value.toUpperCase()==='UPDATE'){i++;const value=nextValue();if(/^CURRENT_TIMESTAMP(?:\(\d*\))?$/i.test(value))field.onUpdate=value;else advanced.push('ON UPDATE '+value)}
   else if(word==='GENERATED'||word==='AS'){
    if(word==='GENERATED'){if(ts[i]?.value.toUpperCase()==='ALWAYS')i++;if(ts[i]?.value.toUpperCase()==='AS')i++}
    const open=ts[i],close=ts.findIndex((t,n)=>n>i&&t.value===')'&&t.depth===0)
@@ -135,10 +140,12 @@ function fieldSQL(field:Field,mode:string,original?:Field){
  if(field.generated){if(!field.expression.trim())throw new Error('请填写生成列表达式');sql+=' GENERATED ALWAYS AS ('+fragment(field.expression,mode)+') '+field.generated}
  sql+=field.notNull?' NOT NULL':' NULL'
  if(!field.generated&&field.defaultMode!=='none'){
-  if(original&&field.defaultMode===original.defaultMode&&field.defaultValue===original.defaultValue&&original.defaultRaw)sql+=' '+original.defaultRaw
+  if(timestampField(field)&&field.defaultMode==='expression'&&/^CURRENT_TIMESTAMP(?:\(\d*\))?$/i.test(field.defaultValue)&&(!original||field.length!==original.length))sql+=' DEFAULT '+currentTimestampSQL(field)
+  else if(original&&field.defaultMode===original.defaultMode&&field.defaultValue===original.defaultValue&&original.defaultRaw)sql+=' '+original.defaultRaw
   else sql+=' DEFAULT '+(field.defaultMode==='null'?'NULL':field.defaultMode==='value'?quoteText(field.defaultValue,mode):defaultExpression(field.defaultValue,mode))
  }
  if(field.autoIncrement){if(field.generated)throw new Error('生成列不能自增');sql+=' AUTO_INCREMENT'}
+ if(field.onUpdate){if(!timestampField(field)||field.generated||!/^CURRENT_TIMESTAMP(?:\(\d*\))?$/i.test(field.onUpdate))throw new Error('仅 TIMESTAMP/DATETIME 普通列支持根据当前时间戳更新');sql+=' ON UPDATE '+currentTimestampSQL(field)}
  if(field.comment)sql+=' '+(original&&field.comment===original.comment&&original.commentRaw?original.commentRaw:'COMMENT '+quoteText(field.comment,mode))
  if(field.advanced.trim())sql+=' '+fragment(field.advanced,mode)
  return sql
