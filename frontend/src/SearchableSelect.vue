@@ -9,7 +9,15 @@ const root=ref<HTMLElement>(),anchor=ref<HTMLElement>(),popupStyle=ref<Record<st
 const items=computed(()=>props.options.map(option=>typeof option==='string'?{value:option,label:option}:option))
 const display=computed(()=>typing.value?query.value:items.value.find(item=>item.value===props.modelValue)?.label??props.modelValue)
 const matches=computed(()=>items.value.filter(item=>(item.label+' '+item.value).toLowerCase().includes(query.value.toLowerCase())))
-function position(){if(!open.value||!anchor.value)return;const box=anchor.value.getBoundingClientRect(),space=window.innerHeight-box.bottom;popupStyle.value={position:'fixed',left:box.left+'px',width:box.width+'px',top:space<150&&box.top>150?Math.max(0,box.top-150)+'px':box.bottom+2+'px',maxHeight:Math.max(60,Math.min(145,space<150&&box.top>150?box.top-4:space-8))+'px'}}
+function position(){
+ if(!open.value||!anchor.value)return
+ const box=anchor.value.getBoundingClientRect(),space=window.innerHeight-box.bottom
+ // Preview dialogs use transforms for dragging; fixed popups are then relative to that ancestor.
+ let context=anchor.value.parentElement
+ while(context){const transform=getComputedStyle(context).transform;if(transform&&transform!=='none')break;context=context.parentElement}
+ const origin=context?.getBoundingClientRect(),left=(origin?.left??0)+(context?.clientLeft??0),top=(origin?.top??0)+(context?.clientTop??0)
+ popupStyle.value={position:'fixed',left:box.left-left+'px',width:box.width+'px',top:(space<150&&box.top>150?Math.max(0,box.top-150):box.bottom+2)-top+'px',maxHeight:Math.max(60,Math.min(145,space<150&&box.top>150?box.top-4:space-8))+'px'}
+}
 function close(){open.value=false}
 function outside(event:Event){if(!(event.target instanceof Node&&root.value?.contains(event.target)))close()}
 watch(open,(value,_,cleanup)=>{if(!value){typing.value=false;return}void nextTick(position);window.addEventListener('resize',position);window.addEventListener('scroll',position,true);window.addEventListener('blur',close);document.addEventListener('pointerdown',outside,true);document.addEventListener('contextmenu',outside,true);cleanup(()=>{window.removeEventListener('resize',position);window.removeEventListener('scroll',position,true);window.removeEventListener('blur',close);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('contextmenu',outside,true)})})

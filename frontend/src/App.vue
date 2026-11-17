@@ -10,6 +10,8 @@ import DatabaseTools, {type DatabaseToolMode} from './DatabaseTools.vue'
 import QueryEditor from './QueryEditor.vue'
 import TableDataEditor from './TableDataEditor.vue'
 import TableDesigner from './TableDesigner.vue'
+import IndexFieldsDialog,{type IndexFieldsRequest} from './IndexFieldsDialog.vue'
+import TableNameDialog,{type TableNameRequest} from './TableNameDialog.vue'
 import type {TableSection} from './tableEditing'
 import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
@@ -126,6 +128,10 @@ const testError = ref('')
 const confirm = reactive({open:false,title:'',body:'',label:'',danger:false,action:null as null|(()=>void|Promise<void>)})
 const about = ref(false)
 const detailDialog=ref<DialogDetails>()
+const indexFieldsPicker=ref<IndexFieldsRequest>()
+const tableNamePrompt=ref<TableNameRequest>()
+function applyIndexFields(value:string){const request=indexFieldsPicker.value;indexFieldsPicker.value=undefined;request?.apply(value)}
+function saveNamedTable(value:string){const request=tableNamePrompt.value;tableNamePrompt.value=undefined;void request?.save(value)}
 type RuntimeCredentials=Pick<ConnectionInput,'password'|'sshPassword'|'sshKeyPassphrase'|'httpToken'>
 const transientPasswords = new Map<string,RuntimeCredentials>()
 let returnFocus:HTMLElement|null=null
@@ -461,9 +467,9 @@ function resizeKeys(e:KeyboardEvent,side:'left'|'right'){if(e.key!=='ArrowLeft'&
 async function copyText(value:string){try{await navigator.clipboard.writeText(value);}catch{showNavigationError('无法访问剪贴板')}}
 function shortcuts(e:KeyboardEvent){
   if(databaseTool.value)return
-  if(e.key==='Escape'){e.preventDefault();if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
+  if(e.key==='Escape'){e.preventDefault();if(indexFieldsPicker.value){indexFieldsPicker.value=undefined}else if(tableNamePrompt.value){tableNamePrompt.value=undefined}else if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
   if(groupDialogOpen.value)return
-  if(detailDialog.value||confirm.open||about.value)return
+  if(indexFieldsPicker.value||tableNamePrompt.value||detailDialog.value||confirm.open||about.value)return
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&dialogOpen.value){e.preventDefault();void saveDialog();return}
   if(dialogOpen.value)return
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();create()}
@@ -484,6 +490,8 @@ const nativeDialogDefinitions=computed(()=>{
  if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
  if(databaseTool.value){const{profile,database,mode,table,initialSQL}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL}})}
  if(about.value)windows.push({key:'about',kind:'about' as const,title:'关于 Bajiu DB · 捌玖',width:365,height:310,payload:{}})
+ if(indexFieldsPicker.value){const{apply,...payload}=indexFieldsPicker.value;windows.push({key:'index-fields',kind:'index-fields' as const,title:'选择索引字段',width:480,height:440,payload})}
+ if(tableNamePrompt.value)windows.push({key:'table-name',kind:'confirm' as const,title:'保存新建表',width:420,height:220,payload:{namePrompt:true,value:tableNamePrompt.value.value}})
  if(detailDialog.value)windows.push({key:'details',kind:'confirm' as const,title:detailDialog.value.title,width:760,height:520,payload:{...detailDialog.value,label:'关闭',notice:true}})
  if(confirm.open)windows.push({key:'confirm',kind:'confirm' as const,title:confirm.title,width:440,height:240,payload:{title:confirm.title,body:confirm.body,label:confirm.label}})
  return windows
@@ -495,6 +503,8 @@ function nativeDialogAction(key:string,event:DialogAction){
   if(action==='save')void saveDialog();else if(action==='test')void testConnection();else if(action==='cancel')cancelDialog();else if(action==='password')passwordChanged();else if(action==='forget')forgetPassword();else if(action==='chooseCA')void chooseCA();else if(action==='chooseSSHKey')void chooseSSHKey()
  }else if(key==='group'){if(Number(payload.clientVersion??0)>=groupClientVersion.value){groupClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(groupForm,payload.changes);else if(payload.model)Object.assign(groupForm,payload.model)};if(action==='save')void saveGroupDialog();else if(action==='cancel')closeGroupDialog()}
  else if(key==='confirm'){if(action==='accept')void acceptConfirm();else if(action==='cancel')cancelConfirm()}
+ else if(key==='index-fields'){if(action==='apply'&&typeof payload.value==='string')applyIndexFields(payload.value);else if(action==='cancel')indexFieldsPicker.value=undefined}
+ else if(key==='table-name'){if(action==='accept'&&typeof payload.value==='string')saveNamedTable(payload.value);else if(action==='cancel')tableNamePrompt.value=undefined}
  else if(key==='details'&&action==='cancel')detailDialog.value=undefined
  else if(key==='about'&&action==='cancel')about.value=false
  else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')closeDatabaseTool()}
@@ -505,7 +515,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
 
 <template>
   <div class="desktop-app" @click="closeMenus">
-    <div class="desktop-workspace" :inert="dialogOpen||groupDialogOpen||confirm.open||about||!!detailDialog||!!databaseTool||undefined">
+    <div class="desktop-workspace" :inert="dialogOpen||groupDialogOpen||confirm.open||about||!!detailDialog||!!indexFieldsPicker||!!tableNamePrompt||!!databaseTool||undefined">
       <nav class="application-menubar" aria-label="主菜单">
         <div v-for="entry in [{id:'file',label:'文件(F)'},{id:'view',label:'查看(V)'},{id:'favorites',label:'收藏夹(A)'},{id:'tools',label:'工具(T)'},{id:'window',label:'窗口(W)'},{id:'help',label:'帮助(H)'}]" :key="entry.id" class="application-menu">
           <button :disabled="entry.id==='favorites'" :title="entry.id==='favorites'?'当前版本尚未提供收藏夹':''" :aria-expanded="menu===entry.id" aria-haspopup="menu" @click.stop="showMenu(entry.id)" :class="{open:menu===entry.id}">{{entry.label}}</button>
@@ -598,7 +608,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
           <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
           </div>
           <QueryEditor v-for="tab in queryDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :initialSQL="tab.initialSQL" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]"/>
-          <TableDesigner v-for="tab in designDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @saved="name=>designSaved(tab,name)" @details="detailDialog=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
+          <TableDesigner v-for="tab in designDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @saved="name=>designSaved(tab,name)" @details="detailDialog=$event" @index-fields="indexFieldsPicker=$event" @request-name="tableNamePrompt=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
           <TableDataEditor v-for="tab in tableDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :section="tab.section" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @section="tab.section=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
         </main>
         <div v-if="showInformation&&activeWorkspaceTab==='objects'" class="pane-splitter" role="separator" aria-label="调整信息窗格宽度" aria-orientation="vertical" tabindex="0" :aria-valuenow="rightWidth" aria-valuemin="180" aria-valuemax="360" @pointerdown="startResize($event,'right')" @keydown="resizeKeys($event,'right')"></div>
@@ -612,6 +622,8 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
     <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>
     <ConfirmationDialog v-if="!nativeWindows&&confirm.open" :title="confirm.title" :body="confirm.body" :label="confirm.label" @cancel="cancelConfirm" @accept="acceptConfirm"/>
     <ConfirmationDialog v-if="!nativeWindows&&detailDialog" v-bind="detailDialog" label="关闭" notice @cancel="detailDialog=undefined" @accept="detailDialog=undefined"/>
+    <IndexFieldsDialog v-if="!nativeWindows&&indexFieldsPicker" v-bind="indexFieldsPicker" @apply="applyIndexFields" @cancel="indexFieldsPicker=undefined"/>
+    <TableNameDialog v-if="!nativeWindows&&tableNamePrompt" :value="tableNamePrompt.value" @save="saveNamedTable" @cancel="tableNamePrompt=undefined"/>
     <AboutDialog v-if="!nativeWindows&&about" @close="about=false"/>
 
   </div>

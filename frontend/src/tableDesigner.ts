@@ -72,6 +72,28 @@ function indexFields(text:string,mode:string){if(!text.trim())throw new Error('�
  const simple=part.match(/^(`(?:``|[^`])+`|[\w$\u0080-\uffff]+)(?:\s*\(\s*(\d+)\s*\))?(?:\s+(ASC|DESC))?$/i)
  return simple?validName(identifier(simple[1]!),'索引字段')+(simple[2]?'('+simple[2]+')':'')+(simple[3]?' '+simple[3].toUpperCase():''):fragment(part,mode)
  }).join(', ')}
+export type IndexFieldSelection={name:string;prefix:string;order:''|'ASC'|'DESC'}
+export type IndexFieldOption=Pick<Field,'name'|'type'|'length'>
+export function parseIndexFieldSelection(text:string,mode=''):IndexFieldSelection[]{
+ return split(text,mode).map(part=>{const match=part.match(/^(`(?:``|[^`])+`|[\w$\u0080-\uffff]+)(?:\s*\(\s*(\d+)\s*\))?(?:\s+(ASC|DESC))?$/i);if(!match)throw new Error('当前索引包含表达式或不完整定义，请直接编辑字段文本。');return {name:identifier(match[1]!),prefix:match[2]??'',order:(match[3]?.toUpperCase()??'') as IndexFieldSelection['order']}})
+}
+export const indexPrefixField=(field:IndexFieldOption)=>/^(?:char|varchar|binary|varbinary|(?:tiny|medium|long)?(?:text|blob))$/i.test(field.type)
+export function indexFieldSelectionSQL(selection:IndexFieldSelection[],fields:IndexFieldOption[],kind:DesignIndex['kind'],method:string){
+ if(!selection.length)throw new Error('请选择至少一个字段')
+ const seen=new Set<string>()
+ return selection.map(item=>{
+  const field=fields.find(field=>field.name===item.name);if(!field)throw new Error('字段已不存在：'+item.name)
+  if(seen.has(item.name.toLowerCase()))throw new Error('索引字段不能重复：'+item.name);seen.add(item.name.toLowerCase())
+  if(!['','ASC','DESC'].includes(item.order))throw new Error('请选择有效的排序顺序')
+  if(item.order&&(method==='HASH'||kind==='SPATIAL'||kind==='FULLTEXT'))throw new Error('当前索引类型不支持指定排序顺序')
+  if(item.prefix){
+   if(!indexPrefixField(field)||kind==='SPATIAL'||kind==='FULLTEXT'||method==='HASH')throw new Error('该字段或索引类型不支持子部分：'+item.name)
+   if(!/^[1-9]\d{0,8}$/.test(item.prefix))throw new Error('子部分须为正整数：'+item.name)
+   if(/^(?:char|varchar|binary|varbinary)$/i.test(field.type)&&/^\d+$/.test(field.length)&&Number(item.prefix)>Number(field.length))throw new Error('子部分不能超过字段长度：'+item.name)
+  }
+  return validName(item.name,'索引字段')+(item.prefix?'('+item.prefix+')':'')+(item.order?' '+item.order:'')
+ }).join(', ')
+}
 const attrWords=new Set(['NOT','NULL','DEFAULT','AUTO_INCREMENT','COMMENT','CHARACTER','COLLATE','GENERATED','AS','ON','UNSIGNED','ZEROFILL','VIRTUAL','STORED','VISIBLE','INVISIBLE','COLUMN_FORMAT','STORAGE','SRID','ENGINE_ATTRIBUTE','SECONDARY_ENGINE_ATTRIBUTE'])
 function parseField(raw:string,mode:string):Field{
  const ts=tokens(raw,mode),field=newField();field.raw=raw;field.name=identifier(ts[0]!.value);field.type=ts[1]!.value.toLowerCase();let i=2
@@ -162,7 +184,7 @@ export function designSQL(database:string,table:string,model:TableDesign,origina
  if(!names.length)throw new Error('至少需要一个字段');if(new Set(names.map(n=>n.toLowerCase())).size!==names.length)throw new Error('字段名不能重复')
  if(model.fields.filter(f=>f.autoIncrement).length>1)throw new Error('一张表只能有一个自增字段')
  const primary=model.indexes.filter(i=>i.kind==='PRIMARY');if(primary.length>1)throw new Error('一张表只能有一个主键')
- if(primary.length&&columnNames(primary[0]!.fields).some(name=>!model.fields.some(f=>f.name===name&&f.notNull)))throw new Error('主键字段须存在并设置为不是 NULL')
+ if(primary.length&&parseIndexFieldSelection(primary[0]!.fields,model.sqlMode).some(({name})=>!model.fields.some(f=>f.name===name&&f.notNull)))throw new Error('主键字段须存在并设置为不是 NULL')
  const compile=(field:Field)=>fieldSQL(field,model.sqlMode,original?.fields.find(f=>f.id===field.id))
  if(!original)return 'CREATE TABLE '+target+' (\n  '+[...model.fields.map(compile),...model.indexes.map(index=>indexSQL(index,model.sqlMode)),...model.foreignKeys.map(foreignSQL),...model.other].join(',\n  ')+'\n) '+optionSQL(model.options,model.sqlMode).join(' ')+';'
  const parts:string[]=[],dropForeign:string[]=[]

@@ -1,18 +1,20 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {createApp,nextTick,type App} from 'vue'
 import TableDesigner from './TableDesigner.vue'
+import type {IndexFieldsRequest} from './IndexFieldsDialog.vue'
+import type {TableNameRequest} from './TableNameDialog.vue'
 import {defaults,type DialogDetails} from './api'
 import {parseDesign} from './tableDesigner'
-let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string,details:DialogDetails[],failure:string
+let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string,details:DialogDetails[],failure:string,pickers:IndexFieldsRequest[],namePrompts:TableNameRequest[]
 const schema='utf8mb4_unicode_ci'
 const result=(columns:string[],rows:(string|null)[][])=>({columns,rows,truncated:false,affected:'0'})
 async function settle(){for(let i=0;i<16;i++){await Promise.resolve();await nextTick()}}
 function button(text:string){const element=Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.trim()===text);if(!element)throw new Error('Button missing: '+text);return element}
 async function click(text:string){button(text).click();await settle()}
 async function input(label:string,value:string){const element=root.querySelector<HTMLInputElement|HTMLTextAreaElement>('[aria-label="'+label+'"]');if(!element)throw new Error('Input missing: '+label);element.value=value;element.dispatchEvent(new Event('input',{bubbles:true}));await settle()}
-async function mount(table?:string){app=createApp(TableDesigner,{profile:{...defaults(),id:'fake'},database:'qa',table,connected:true,active:true,sessionKey:'qa-session',onDetails:(value:DialogDetails)=>details.push(value),onConfirm:(request:typeof confirmations[number])=>confirmations.push(request),onSaved:(name:string)=>saved.push(name)});app.mount(root);await settle()}
+async function mount(table?:string){app=createApp(TableDesigner,{profile:{...defaults(),id:'fake'},database:'qa',table,connected:true,active:true,sessionKey:'qa-session','onIndex-fields':(value:IndexFieldsRequest)=>pickers.push(value),'onRequest-name':(value:TableNameRequest)=>namePrompts.push(value),onDetails:(value:DialogDetails)=>details.push(value),onConfirm:(request:typeof confirmations[number])=>confirmations.push(request),onSaved:(name:string)=>saved.push(name)});app.mount(root);await settle()}
 beforeEach(()=>{
- localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';details=[];failure='';root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
+ localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';details=[];failure='';pickers=[];namePrompts=[];root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
  window.go={main:{App:{DatabaseAdmin:vi.fn(async(_task,_id,_db,req)=>{
   if(req.operation==='catalog')return {results:[result(['Collation','Charset','Id','Default'],[[schema,'utf8mb4','1',''],['utf8mb4_general_ci','utf8mb4','2','Yes'],['latin1_swedish_ci','latin1','3','Yes']])],completed:1,error:'',text:''}
   if(req.operation==='schema')return {results:[result(['DEFAULT_CHARACTER_SET_NAME','DEFAULT_COLLATION_NAME'],[['utf8mb4',schema]])],completed:1,error:'',text:''}
@@ -26,6 +28,21 @@ beforeEach(()=>{
 })
 afterEach(()=>{app?.unmount();app=undefined;root.remove();delete window.go;vi.unstubAllGlobals()})
 describe('designer controls',()=>{
+ it('requests the table name on save and continues saving on the current tab after naming',async()=>{
+  await mount();await input('字段 1 名称','title');await click('保存');expect(namePrompts).toHaveLength(1);expect(commands.some(sql=>sql.includes('CREATE TABLE'))).toBe(false);expect(details).toHaveLength(0)
+  await namePrompts[0]!.save('named');await settle();expect(saved).toEqual(['named']);expect(commands.some(sql=>sql.includes('CREATE TABLE `qa`.`named`'))).toBe(true);expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段')
+ })
+ it('toggles the primary key from the whole cell and button without cancellation confirmations',async()=>{
+  await mount();await input('字段 1 名称','id');const cell=root.querySelector<HTMLElement>('.designer-key-cell')!,key=cell.querySelector('button')!
+  cell.click();await settle();expect(key.getAttribute('aria-pressed')).toBe('true');cell.click();await settle();expect(key.getAttribute('aria-pressed')).toBe('false');expect(confirmations).toHaveLength(0)
+  key.click();await settle();expect(key.getAttribute('aria-pressed')).toBe('true');key.click();await settle();expect(key.getAttribute('aria-pressed')).toBe('false');expect(confirmations).toHaveLength(0)
+ })
+ it('applies selected index columns only on confirmation and protects an intervening edit',async()=>{
+  await mount();await input('字段 1 名称','title');await click('索引');await click('添加索引');const open=()=>{root.querySelector<HTMLButtonElement>('[aria-label="选择索引字段 idx_1"]')!.click()}
+  open();await settle();expect(pickers[0]?.fields.map(field=>field.name)).toEqual(['title']);expect(root.querySelector<HTMLInputElement>('[aria-label="索引字段"]')?.value).toBe('')
+  pickers[0]!.apply('`title`(12) DESC');await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="索引字段"]')?.value).toBe('`title`(12) DESC')
+  open();await settle();await input('索引字段','title');pickers[1]!.apply('`title`(8) ASC');await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="索引字段"]')?.value).toBe('title');expect(details.at(-1)?.details).toContain('已变化');expect(commands.some(sql=>sql.includes('CREATE TABLE'))).toBe(false)
+ })
  it('automatically loads changed server structure, retains the prior draft SQL and does not execute it',async()=>{
   ddl="CREATE TABLE `items` (`title` varchar(80)) ENGINE=InnoDB";await mount('items');await input('title长度','120')
   ddl="CREATE TABLE `items` (`title` varchar(100), `remote` int) ENGINE=InnoDB";await click('保存')

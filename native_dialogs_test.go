@@ -30,3 +30,14 @@ func TestWindowDialogValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestIndexFieldsWindow(t *testing.T) {
+	state := WindowDialog{ID: "qa-index-fields", Kind: "index-fields", Width: 480, Height: 440, Payload: json.RawMessage(`{"fields":[],"value":"","kind":"NORMAL","method":"","sqlMode":""}`)}
+	if err := validWindowDialog(state); err != nil {
+		t.Fatal(err)
+	}
+	options := dialogWindowOptions(state)
+	if options.DisableResize || options.Width != 480 || options.Height != 440 {
+		t.Fatal("index field selection must use a resizable native window")
+	}
+}

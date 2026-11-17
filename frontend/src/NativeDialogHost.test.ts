@@ -22,3 +22,9 @@ it('shows detailed errors and read-only SQL in the native dialog with a single c
  expect(root.querySelector('pre')?.textContent).toContain('1064 (42000)');expect(root.querySelector('textarea')?.readOnly).toBe(true);expect(root.querySelector('textarea')?.value).toBe(state.payload.sql);expect(root.querySelectorAll('button')).toHaveLength(1)
  ;(root.querySelector('button') as HTMLButtonElement).click();await settle();expect(send).toHaveBeenLastCalledWith({id:'qa-native',action:'cancel',payload:{}})
 })
+it('returns native index selections and prompted names to the owning designer',async()=>{
+ const state:WindowDialog={id:'qa-native',kind:'index-fields',title:'选择索引字段',width:480,height:440,revision:1,payload:{fields:[{name:'title',type:'varchar',length:'80'}],value:'title(12) DESC',kind:'NORMAL',method:'',sqlMode:''}}
+ window.go!.main.App.GetWindowDialog=vi.fn(async()=>state);app=createApp(NativeDialogHost);app.mount(root);await settle()
+ ;(Array.from(root.querySelectorAll('button')).find(button=>button.textContent==='确定') as HTMLButtonElement).click();await settle();expect(send).toHaveBeenLastCalledWith({id:'qa-native',action:'apply',payload:{value:'`title`(12) DESC'}})
+ window.dispatchEvent(new CustomEvent('bajiu:dialog-state',{detail:{...state,kind:'confirm',revision:2,payload:{namePrompt:true,value:''}}}));await settle();const input=root.querySelector<HTMLInputElement>('#new-table-name')!;input.value='notes';input.dispatchEvent(new Event('input',{bubbles:true}));await settle();root.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await settle();expect(send).toHaveBeenLastCalledWith({id:'qa-native',action:'accept',payload:{value:'notes'}})
+})

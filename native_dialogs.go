@@ -30,7 +30,7 @@ type nativeDialog struct {
 }
 
 func dialogWindowOptions(state WindowDialog) application.WebviewWindowOptions {
-	options := application.WebviewWindowOptions{Name: "dialog-" + state.ID, Title: state.Title, URL: "/?desktop=1&dialog=" + state.ID, Width: max(320, min(1400, state.Width)), Height: max(180, min(1000, state.Height)), MinWidth: 320, MinHeight: 180, DisableResize: state.Kind != "database", BackgroundColour: application.NewRGB(255, 255, 255), Windows: application.WindowsWindow{Theme: application.Light}}
+	options := application.WebviewWindowOptions{Name: "dialog-" + state.ID, Title: state.Title, URL: "/?desktop=1&dialog=" + state.ID, Width: max(320, min(1400, state.Width)), Height: max(180, min(1000, state.Height)), MinWidth: 320, MinHeight: 180, DisableResize: state.Kind != "database" && state.Kind != "index-fields", BackgroundColour: application.NewRGB(255, 255, 255), Windows: application.WindowsWindow{Theme: application.Light}}
 	var payload struct {
 		Mode string `json:"mode"`
 	}
@@ -59,7 +59,7 @@ func validWindowDialog(state WindowDialog) error {
 		}
 	}
 	switch state.Kind {
-	case "connection", "group", "confirm", "about", "database":
+	case "connection", "group", "confirm", "about", "database", "index-fields":
 	default:
 		return errors.New("未知窗口类型")
 	}

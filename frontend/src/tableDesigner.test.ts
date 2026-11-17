@@ -1,8 +1,16 @@
 import {describe,it,expect} from 'vitest'
-import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid,fieldDefaultInput,setFieldDefaultInput,sameTableDDL} from './tableDesigner'
+import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid,fieldDefaultInput,setFieldDefaultInput,sameTableDDL,parseIndexFieldSelection,indexFieldSelectionSQL} from './tableDesigner'
 const fixture="CREATE TABLE `items` (\n `id` bigint unsigned NOT NULL AUTO_INCREMENT,\n `title` varchar(80) NOT NULL DEFAULT 'O''Brien' COMMENT 'name',\n `calc` int GENERATED ALWAYS AS ((length(`title`) + 1)) VIRTUAL,\n PRIMARY KEY (`id`),\n KEY `idx_title` (`title`(20)) COMMENT 'prefix',\n CONSTRAINT `check_title` CHECK ((length(`title`) > 0))\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='table'"
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v))
 describe('table designer SQL',()=>{
+ it('round-trips selected index parts with quoted commas, backticks, prefixes and ordering',()=>{
+  const fields=[{name:'a,`b',type:'varchar',length:'80'},{name:'id',type:'int',length:'11'}],text='`a,``b`(12) DESC, `id` ASC'
+  expect(indexFieldSelectionSQL(parseIndexFieldSelection(text),fields,'NORMAL','BTREE')).toBe(text)
+  const draft=newDesign();Object.assign(draft.fields[0]!,{name:'title',notNull:true});draft.indexes.push({id:uid(),name:'PRIMARY',kind:'PRIMARY',fields:'`title`(12) DESC',method:'',comment:''});expect(designSQL('qa','selected',draft)).toContain('PRIMARY KEY (`title`(12) DESC)')
+  expect(()=>parseIndexFieldSelection('(lower(`a`))')).toThrow('表达式')
+  for(const [name,prefix,order,kind,method] of [['id','2','','NORMAL',''],['a,`b','81','','NORMAL',''],['a,`b','1;DROP','','NORMAL',''],['a,`b','','DESC','SPATIAL',''],['a,`b','','DESC','NORMAL','HASH']] as const)expect(()=>indexFieldSelectionSQL([{name,prefix,order}],fields,kind,method)).toThrow()
+  expect(()=>indexFieldSelectionSQL([{name:'gone',prefix:'',order:''}],fields,'NORMAL','')).toThrow('不存在')
+ })
  it('ignores table counter movement without hiding real column, comment or auto-increment changes',()=>{
   const before="CREATE TABLE `items` (`id` int AUTO_INCREMENT, `note` varchar(80) COMMENT 'AUTO_INCREMENT=12', PRIMARY KEY (`id`)) ENGINE=InnoDB AUTO_INCREMENT=12"
   expect(sameTableDDL(before,before.replace(/AUTO_INCREMENT=12$/,'AUTO_INCREMENT=99'))).toBe(true)
