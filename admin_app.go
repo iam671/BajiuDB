@@ -51,6 +51,31 @@ type SQLFile struct {
 	Statements int    `json:"statements"`
 }
 
+type CSVFile struct {
+	Path string `json:"path"`
+	Text string `json:"text"`
+}
+
+func (a *App) OpenCSVFile() (CSVFile, error) {
+	path, err := a.desktop.Dialog.OpenFile().SetTitle("选择 CSV 文件").AddFilter("CSV 文件（UTF-8）", "*.csv").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
+	if err != nil || path == "" {
+		return CSVFile{}, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return CSVFile{}, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (8<<20)+1))
+	if err != nil {
+		return CSVFile{}, err
+	}
+	if len(data) > 8<<20 || !utf8.Valid(data) {
+		return CSVFile{}, errors.New("请选择 8 MB 以内的 UTF-8 CSV 文件")
+	}
+	return CSVFile{Path: path, Text: string(data)}, nil
+}
+
 func (a *App) OpenSQLFile() (SQLFile, error) {
 	path, err := a.desktop.Dialog.OpenFile().SetTitle("选择要运行的 SQL 文件").AddFilter("SQL 文件（UTF-8）", "*.sql").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 	if err != nil || path == "" {
@@ -80,7 +105,7 @@ func (a *App) SaveDatabaseReport(name, text string) (string, error) {
 	}
 	name = filepath.Base(name)
 	ext := strings.ToLower(filepath.Ext(name))
-	if ext != ".sql" && ext != ".html" && ext != ".svg" {
+	if ext != ".sql" && ext != ".html" && ext != ".svg" && ext != ".csv" {
 		return "", errors.New("不支持的导出格式")
 	}
 	path, err := a.desktop.Dialog.SaveFile().SetFilename(name).AddFilter("数据库文件", "*"+ext).AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()

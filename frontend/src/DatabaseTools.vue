@@ -4,19 +4,23 @@ import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue'
 import {X,Play,Square,FolderOpen,Save,Database,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile} from './api'
 import {dictionaryHTML,modelSVG} from './databaseReports'
-export type DatabaseToolMode='create'|'alter'|'drop'|'query'|'console'|'run'|'dump'|'dictionary'|'model'
-const props=defineProps<{profile:Profile;database:string;mode:DatabaseToolMode}>()
+import SearchableSelect from './SearchableSelect.vue'
+import TableWorkflows from './TableWorkflows.vue'
+export type DatabaseToolMode='create'|'alter'|'drop'|'query'|'console'|'run'|'dump'|'dictionary'|'model'|'createTable'|'import'|'export'|'generate'
+const props=defineProps<{profile:Profile;database:string;mode:DatabaseToolMode;table?:string;initialSQL?:string}>()
 const emit=defineEmits<{close:[];changed:[operation:string,name:string]}>()
-const names:Record<DatabaseToolMode,string>={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型'}
-const running=ref(false),error=ref(''),message=ref(''),sql=ref(''),file=ref(''),statements=ref(0),includeData=ref(true),name=ref(props.mode==='create'?'':props.database),confirmName=ref(''),charset=ref('utf8mb4'),collation=ref(''),catalog=ref<(string|null)[][]>([]),result=ref<AdminResult|null>(null),svg=ref(''),zoom=ref(1),consoleLines=ref<string[]>([]),history:string[]=[],historyIndex=ref(0),editor=ref<HTMLTextAreaElement>(),windowRef=ref<HTMLElement>()
+const names:Record<DatabaseToolMode,string>={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成'}
+const running=ref(false),error=ref(''),message=ref(''),sql=ref(props.initialSQL??''),file=ref(''),statements=ref(0),includeData=ref(true),name=ref(props.mode==='create'?'':props.database),confirmName=ref(''),charset=ref('utf8mb4'),collation=ref(''),catalog=ref<(string|null)[][]>([]),result=ref<AdminResult|null>(null),svg=ref(''),zoom=ref(1),consoleLines=ref<string[]>([]),history:string[]=[],historyIndex=ref(0),editor=ref<HTMLTextAreaElement>(),windowRef=ref<HTMLElement>()
+const workflow=ref<InstanceType<typeof TableWorkflows>>()
+const workflowMode=computed(()=>['createTable','import','export','generate'].includes(props.mode)?props.mode as 'createTable'|'import'|'export'|'generate':null)
 let task=''
 const charsets=computed(()=>[...new Set(catalog.value.map(r=>r[1]??''))].filter(Boolean).sort())
 const collations=computed(()=>catalog.value.filter(r=>r[1]===charset.value).map(r=>r[0]??''))
-function selectCharset(){collation.value=collations.value.find(c=>c===charset.value+'_general_ci')??collations.value[0]??''}
+function selectCharset(){if(!charsets.value.includes(charset.value))return;if(collations.value.includes(collation.value))return;collation.value=collations.value.find(c=>c===charset.value+'_general_ci')??collations.value[0]??''}
 async function request(request:AdminRequest){task=crypto.randomUUID();try{return await api.DatabaseAdmin(task,props.profile.id,props.database,request)}finally{task=''}}
 async function perform(action:()=>Promise<void>){if(running.value)return;running.value=true;error.value='';message.value='';try{await action()}catch(e){error.value=errorText(e)}finally{running.value=false}}
 async function cancel(){if(task)try{await api.CancelDatabaseTask(task)}catch(e){error.value=errorText(e)}}
-function close(){if(running.value){void cancel();return}emit('close')}
+function close(){if(workflowMode.value){workflow.value?.requestClose();return}if(running.value){void cancel();return}emit('close')}
 defineExpose({requestClose:close})
 function trap(event:KeyboardEvent){const nodes=Array.from(windowRef.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')??[]).filter(el=>el.getClientRects().length);if(event.shiftKey&&document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1)?.focus()}else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0]?.focus()}}
 async function loadFile(){await perform(async()=>{const chosen=await api.OpenSQLFile();if(!chosen.path)return;file.value=chosen.path;sql.value=chosen.text;statements.value=chosen.statements;result.value=null})}
@@ -38,15 +42,16 @@ async function dump(){await perform(async()=>{const response=await request({oper
 onMounted(async()=>{
  await nextTick();(editor.value??Array.from(windowRef.value?.querySelectorAll<HTMLElement>('input,select,textarea,button')??[]).find(el=>el.getClientRects().length))?.focus()
  if(props.mode==='create'||props.mode==='alter')await perform(async()=>{catalog.value=(await request({operation:'catalog'})).results[0]?.rows??[];selectCharset();if(props.mode==='alter'){const schema=(await request({operation:'schema'})).results[0]?.rows[0];if(schema){charset.value=schema[0]??'';collation.value=schema[1]??''}}})
- if(props.mode==='dictionary'||props.mode==='model')await perform(async()=>{result.value=await request({operation:props.mode});if(props.mode==='model')svg.value=modelSVG(props.database,result.value)})
+ if(props.mode==='dictionary'||props.mode==='model')await perform(async()=>{result.value=await request({operation:props.mode});if(props.mode==='dictionary'&&props.table)result.value.results.forEach(r=>{r.rows=r.rows.filter(row=>row[0]===props.table)});if(props.mode==='model')svg.value=modelSVG(props.database,result.value)})
 })
 onUnmounted(()=>{if(task)void api.CancelDatabaseTask(task)})
 </script>
 <template>
- <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode)}" role="dialog" aria-modal="true" :aria-label="names[mode]">
+ <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode),'db-tools-drop':mode==='drop'}" role="dialog" aria-modal="true" :aria-label="names[mode]">
   <header><Database :size="16"/><h2>{{names[mode]}} · {{profile.name}}<template v-if="mode!=='create'"> / {{database}}</template></h2><button class="tiny-button" aria-label="关闭数据库工具" @click="close"><X :size="17"/></button></header>
-  <div class="db-tools-body">
-   <template v-if="mode==='create'||mode==='alter'"><p class="db-tools-note">{{mode==='alter'?'修改数据库默认字符集和排序规则，不会重命名数据库或转换已有表的数据。':'创建一个空数据库，权限由当前 MySQL 账户决定。'}}</p><div class="db-schema-form"><label for="schema-name">数据库名</label><input id="schema-name" v-model="name" :disabled="mode==='alter'||running" maxlength="64"/><label for="schema-charset">字符集</label><select id="schema-charset" v-model="charset" @change="selectCharset" :disabled="running"><option v-for="value in charsets" :key="value">{{value}}</option></select><label for="schema-collation">排序规则</label><select id="schema-collation" v-model="collation" :disabled="running"><option v-for="value in collations" :key="value">{{value}}</option></select></div></template>
+  <TableWorkflows v-if="workflowMode" ref="workflow" :profile="profile" :database="database" :table="table" :mode="workflowMode" @close="emit('close')" @changed="(operation,name)=>emit('changed',operation,name)"/>
+  <div v-else class="db-tools-body">
+   <template v-if="mode==='create'||mode==='alter'"><p class="db-tools-note">{{mode==='alter'?'修改数据库默认字符集和排序规则，不会重命名数据库或转换已有表的数据。':'创建一个空数据库，权限由当前 MySQL 账户决定。'}}</p><div class="db-schema-form"><label for="schema-name">数据库名</label><input id="schema-name" v-model="name" :disabled="mode==='alter'||running" maxlength="64"/><label for="schema-charset">字符集</label><SearchableSelect label="字符集" id="schema-charset" v-model="charset" :options="charsets" @change="selectCharset" :disabled="running"/><label for="schema-collation">排序规则</label><SearchableSelect label="排序规则" id="schema-collation" v-model="collation" :options="collations" :disabled="running"/></div></template>
    <template v-else-if="mode==='drop'"><p class="db-danger">删除数据库将永久删除其中的表、数据、视图和其他对象，无法通过 Bajiu DB 撤销。请先完成备份。</p><label for="drop-confirm">输入数据库名 <strong>{{database}}</strong> 确认删除</label><input id="drop-confirm" v-model="confirmName" :disabled="running" autocomplete="off"/></template>
    <template v-else-if="['query','console','run'].includes(mode)">
     <div class="db-tools-toolbar"><button v-if="mode==='run'" class="native-button" @click="loadFile" :disabled="running"><FolderOpen :size="14"/>选择 SQL 文件</button><button class="native-button default-button" @click="execute" :disabled="running||!sql.trim()"><Play :size="14"/>{{mode==='run'?'执行文件':'执行'}}<span v-if="mode==='query'">（选中或全部）</span></button><span v-if="file" class="db-file-path">{{file}} · {{statements}} 条语句</span></div>
@@ -60,6 +65,6 @@ onUnmounted(()=>{if(task)void api.CancelDatabaseTask(task)})
    <template v-else-if="mode==='model'&&svg"><div class="db-tools-toolbar"><button class="native-button" @click="perform(()=>saveReport('svg',svg))" :disabled="running"><Save :size="14"/>保存 SVG 模型</button><label>缩放 <input type="range" min="0.3" max="2" step="0.1" v-model.number="zoom"/> {{Math.round(zoom*100)}}%</label></div><p class="db-tools-note">◆ 表示主键，连线来自服务器声明的外键；不推测未声明的关系。最多显示 200 个表/视图，跨库外键不绘制到当前模型。</p><div class="db-model-canvas"><div :style="{zoom}" v-html="svg"></div></div></template>
    <p v-if="running" role="status" class="db-tools-status"><LoaderCircle :size="15" class="spin"/>正在处理…<button class="native-button" @click="cancel"><Square :size="12"/>停止</button></p><p v-if="error" class="db-tools-error" role="alert">{{error}}</p><p v-if="message" class="db-tools-message" role="status">{{message}}</p>
   </div>
-  <footer><button v-if="mode==='create'||mode==='alter'" class="native-button default-button" @click="saveSchema" :disabled="running||!name||!collation">保存</button><button v-if="mode==='drop'" class="native-button db-delete-button" @click="saveSchema" :disabled="running||confirmName!==database">删除数据库</button><button class="native-button" @click="close">{{running?'停止操作':'关闭'}}</button></footer>
+  <footer v-if="!workflowMode"><button v-if="mode==='create'||mode==='alter'" class="native-button default-button" @click="saveSchema" :disabled="running||!name||!collation">保存</button><button v-if="mode==='drop'" class="native-button db-delete-button" @click="saveSchema" :disabled="running||confirmName!==database">删除数据库</button><button class="native-button" @click="close">{{running?'停止操作':'关闭'}}</button></footer>
  </section></div>
 </template>

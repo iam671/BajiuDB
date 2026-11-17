@@ -29,6 +29,22 @@ type nativeDialog struct {
 	order  uint64
 }
 
+func dialogWindowOptions(state WindowDialog) application.WebviewWindowOptions {
+	options := application.WebviewWindowOptions{Name: "dialog-" + state.ID, Title: state.Title, URL: "/?desktop=1&dialog=" + state.ID, Width: max(320, min(1400, state.Width)), Height: max(180, min(1000, state.Height)), MinWidth: 320, MinHeight: 180, DisableResize: state.Kind != "database", BackgroundColour: application.NewRGB(255, 255, 255), Windows: application.WindowsWindow{Theme: application.Light}}
+	var payload struct {
+		Mode string `json:"mode"`
+	}
+	if state.Kind == "database" && json.Unmarshal(state.Payload, &payload) == nil && payload.Mode == "drop" {
+		options.Width = 420
+		options.Height = 320
+		options.DisableResize = true
+		options.MinimiseButtonState = application.ButtonHidden
+		options.MaximiseButtonState = application.ButtonHidden
+		options.FullscreenButtonState = application.ButtonHidden
+	}
+	return options
+}
+
 func validWindowDialog(state WindowDialog) error {
 	if len(state.ID) < 8 || len(state.ID) > 80 || len(state.Payload) > 1<<20 || !json.Valid(state.Payload) {
 		return errors.New("窗口参数无效")
@@ -78,10 +94,8 @@ func (a *App) OpenWindowDialog(state WindowDialog) error {
 		return errors.New("打开的窗口过多")
 	}
 	a.dialogMu.Unlock()
-	width := max(320, min(1400, state.Width))
-	height := max(180, min(1000, state.Height))
 	state.Revision = 1
-	window := a.desktop.Window.NewWithOptions(application.WebviewWindowOptions{Name: "dialog-" + state.ID, Title: state.Title, URL: "/?desktop=1&dialog=" + state.ID, Width: width, Height: height, MinWidth: 320, MinHeight: 180, DisableResize: state.Kind != "database", BackgroundColour: application.NewRGB(255, 255, 255), Windows: application.WindowsWindow{Theme: application.Light}})
+	window := a.desktop.Window.NewWithOptions(dialogWindowOptions(state))
 	a.dialogMu.Lock()
 	a.dialogSequence++
 	a.dialogs[state.ID] = &nativeDialog{state: state, window: window, order: a.dialogSequence}

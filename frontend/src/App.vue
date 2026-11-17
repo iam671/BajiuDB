@@ -7,6 +7,7 @@ import InlineGroupEditor from './InlineGroupEditor.vue'
 import DatabaseTools, {type DatabaseToolMode} from './DatabaseTools.vue'
 import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
+import {quoteIdentifier} from './tableData'
 import {useNativeDialogs} from './nativeDialogs'
 import {hasNativeWindows,type DialogAction} from './api'
 import { api, defaults, fromProfile, errorText, isDesktop, type Profile, type ConnectionInput, type ConnectionGroup, type SessionInfo, type DatabaseObject, type TestResult } from './api'
@@ -44,6 +45,26 @@ const rootExpanded = ref(true)
 const expandedConnections = reactive(new Set<string>())
 const expandedDatabases = reactive(new Set<string>())
 const openedDatabases = reactive(new Set<string>())
+const expandedCategories=reactive(new Set<string>()),expandedTables=reactive(new Set<string>())
+const treeObjects=reactive<Record<string,DatabaseObject[]>>({}),treeColumns=reactive<Record<string,(string|null)[][]>>({}),treeLoading=reactive(new Set<string>())
+let treeEpoch=0
+const treeKey=(id:string,db:string,kind:string)=>JSON.stringify([id,db,kind])
+function clearTree(id?:string,db?:string){treeEpoch++;for(const record of [treeObjects,treeColumns])for(const key of Object.keys(record)){const parts=JSON.parse(key);if((!id||parts[0]===id)&&(!db||parts[1]===db))delete record[key]}for(const state of [expandedCategories,expandedTables,treeLoading])for(const key of state){const parts=JSON.parse(key);if((!id||parts[0]===id)&&(!db||parts[1]===db))state.delete(key)}}
+function treeList(p:Profile,db:string,kind:Category){return treeObjects[treeKey(p.id,db,kind)]??[]}
+function categoryExpandable(p:Profile,db:string,kind:Category){const list=treeObjects[treeKey(p.id,db,kind)];return !list||list.length>0}
+async function toggleCategory(p:Profile,db:string,kind:Category,open?:boolean){const key=treeKey(p.id,db,kind);if(open===false||(open===undefined&&expandedCategories.has(key))){expandedCategories.delete(key);return}expandedCategories.add(key);await selectDatabase(p,db,kind)}
+async function selectTreeObject(p:Profile,db:string,kind:Category,object:DatabaseObject){if(selectedID.value!==p.id||selectedDatabase.value!==db||category.value!==kind)await selectDatabase(p,db,kind);if(selectedID.value===p.id&&selectedDatabase.value===db&&category.value===kind){databaseNodeSelected.value=false;selectWorkspaceRow({key:object.name,name:object.name,kind,object});showInformation.value=true}}
+async function toggleTable(p:Profile,db:string,object:DatabaseObject,open?:boolean){
+ const key=treeKey(p.id,db,object.name)
+ if(open===false||(open===undefined&&expandedTables.has(key))){expandedTables.delete(key);return}
+ expandedTables.add(key);if(treeColumns[key]||treeLoading.has(key))return
+ const epoch=treeEpoch;treeLoading.add(key)
+ try{const response=await api.DatabaseAdmin(crypto.randomUUID(),p.id,db,{operation:'query',sql:'SHOW FULL COLUMNS FROM '+quoteIdentifier(object.name)});if(response.error)throw new Error(response.error);if(epoch===treeEpoch&&databaseIsOpen(p.id,db))treeColumns[key]=response.results[0]?.rows??[]}
+ catch(e){if(epoch===treeEpoch){expandedTables.delete(key);showNavigationError(errorText(e))}}finally{treeLoading.delete(key)}
+}
+async function refreshTableList(p:Profile,db:string){clearTree(p.id,db);await selectDatabase(p,db,'tables');await loadObjects()}
+async function contextForTable(e:MouseEvent,p:Profile,db:string,object?:DatabaseObject){contextMenu.table=object?.name??'';contextMenu.database=db;contextMenu.connectionID=p.id;showContext(e,'table');if(object)await selectTreeObject(p,db,'tables',object)}
+
 const leftWidth = ref(240)
 const rightWidth = ref(218)
 const showSidebar = ref(true)
@@ -56,8 +77,8 @@ const configPath = ref('')
 const desktop = ref(isDesktop())
 const nativeWindows=hasNativeWindows()
 const menu = ref('')
-const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database',database:'',connectionID:''})
-const databaseTool=ref<{profile:Profile;database:string;mode:DatabaseToolMode}|null>(null)
+const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:''})
+const databaseTool=ref<{profile:Profile;database:string;mode:DatabaseToolMode;table?:string;initialSQL?:string}|null>(null)
 const navigationError=ref('')
 const draggedConnectionID=ref('')
 const movingConnectionID=ref('')
@@ -144,7 +165,7 @@ function duplicate(){const p=selected.value;if(!p)return;openDialog();Object.ass
 function validate(requireName=true){for(const key of Object.keys(errors))delete errors[key];if(requireName&&!form.name.trim())errors.name='请输入连接名';if(!form.host.trim())errors.host='请输入主机地址';if(!Number.isInteger(Number(form.port))||form.port<1||form.port>65535)errors.port='端口范围为 1–65535';if(!form.username.trim())errors.username='请输入用户名';if(Object.keys(errors).length){dialogRef.value?.showValidation();return false}return true}
 function clearDDL(resetTab=true){ddlRequest++;if(resetTab)informationTab.value='info';ddlText.value='';ddlError.value='';ddlLoading.value=false;ddlCopied.value=false;ddlCopying.value=false;ddlCopyError.value=''}
 function invalidateObjects(){objectRequest++;objects.value=[];objectsError.value='';objectsLoading.value=false;selectedRowKey.value='';truncated.value=false;clearDDL()}
-function clearDatabaseState(id:string){for(const state of [openedDatabases,expandedDatabases])for(const key of state)if(key.startsWith(id+'/'))state.delete(key)}
+function clearDatabaseState(id:string){clearTree(id);for(const state of [openedDatabases,expandedDatabases])for(const key of state)if(key.startsWith(id+'/'))state.delete(key)}
 function databaseIsOpen(id:string,database:string){return !!sessions[id]&&openedDatabases.has(id+'/'+database)}
 function databaseIconClass(id:string,database:string){return databaseIsOpen(id,database)?'database-icon database-open':'database-icon'}
 function selectProfile(p:Profile){if(busy.value||dialogOpen.value||groupDialogOpen.value)return;selectedGroupID.value=p.groupId??'';selectedID.value=p.id;selectedDatabase.value='';databaseNodeSelected.value=false;objectSearch.value='';invalidateObjects()}
@@ -247,7 +268,7 @@ async function disconnectAll(){
  try{
   await api.DisconnectAll()
   for(const id of Object.keys(sessions))delete sessions[id]
-  openedDatabases.clear();expandedDatabases.clear();expandedConnections.clear();selectedDatabase.value='';invalidateObjects();
+  clearTree();openedDatabases.clear();expandedDatabases.clear();expandedConnections.clear();selectedDatabase.value='';invalidateObjects();
  }catch(e){showNavigationError(errorText(e))}finally{busy.value=''}
 }
 async function saveDialog(){
@@ -297,7 +318,7 @@ async function loadObjects(){
   const id=selectedID.value,database=selectedDatabase.value,kind=category.value
   if(!id||!database||!sessions[id])return
   const request=++objectRequest;objectsLoading.value=true;objectsError.value='';objects.value=[];truncated.value=false;selectedRowKey.value='';clearDDL()
-  try{const result=await api.ListObjects(id,database,kind);if(request===objectRequest){objects.value=result.objects??[];truncated.value=result.truncated;openedDatabases.add(id+'/'+database)}}
+  try{const result=await api.ListObjects(id,database,kind);if(request===objectRequest){objects.value=result.objects??[];treeObjects[treeKey(id,database,kind)]=objects.value;truncated.value=result.truncated;openedDatabases.add(id+'/'+database)}}
   catch(e){if(request===objectRequest)objectsError.value=errorText(e)}
   finally{if(request===objectRequest)objectsLoading.value=false}
 }
@@ -336,7 +357,7 @@ function passwordChanged(){form.passwordAction='replace';clearFeedback()}
 function forgetPassword(){form.password='';form.sshPassword='';form.sshKeyPassphrase='';form.httpToken='';form.passwordAction='forget';form.sshPasswordAction='replace';form.sshKeyPassphraseAction='replace';form.httpTokenAction='replace';form.rememberPassword=false;form.hasPassword=false}
 async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.caPath=path}catch(e){testError.value=errorText(e)}}
 async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
-function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'){
+function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table'){
  if(busy.value||dialogOpen.value||groupDialogOpen.value)return
  navigationError.value='';contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:230)));menu.value=''
  nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
@@ -345,15 +366,22 @@ function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'conn
 function contextForRoot(e:MouseEvent){selectRoot();showContext(e,'root')}
 function contextForGroup(e:MouseEvent,id:string){selectConnectionGroup(id);showContext(e,'group')}
 function contextForDatabase(e:MouseEvent,p:Profile,database:string){selectDatabaseInfo(p,database);contextMenu.database=database;contextMenu.connectionID=p.id;showContext(e,'database')}
-function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
-function closeDatabase(p:Profile,database:string){openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database);if(selectedID.value===p.id&&selectedDatabase.value===database){selectProfile(p);selectedRowKey.value=database;databaseNodeSelected.value=true}}
-function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode){closeMenus();databaseTool.value={profile:p,database,mode}}
+function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.object?.kind==='tables'&&selected.value){void contextForTable(e,selected.value,selectedDatabase.value,row.object);return}if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
+function closeDatabase(p:Profile,database:string){clearTree(p.id,database);openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database);if(selectedID.value===p.id&&selectedDatabase.value===database){selectProfile(p);selectedRowKey.value=database;databaseNodeSelected.value=true}}
+function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
+function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();databaseTool.value={profile:p,database,mode,table,initialSQL:mode==='query'&&table?'SELECT * FROM '+quoteIdentifier(table)+' LIMIT 1000;':undefined}}
 async function databaseChanged(operation:string,name:string){
  const target=databaseTool.value;if(!target)return
+ if(operation==='table'){try{await refreshTableList(target.profile,target.database)}catch(e){showNavigationError(errorText(e))}return}
  try{sessions[target.profile.id]=await api.RefreshDatabases(target.profile.id);if(operation==='drop')closeDatabase(target.profile,target.database);else if(operation==='create'){selectProfile(target.profile);selectedRowKey.value=name;databaseNodeSelected.value=true}}
  catch(e){showNavigationError(errorText(e))}
 }
 function contextItems():MenuItem[]{
+ if(contextMenu.kind==='table'){
+  const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database,table=contextMenu.table;if(!p)return []
+  return ([['createTable','新建表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map(([mode,label])=>({label,action:()=>showDatabaseTool(p,db,mode,table)})).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
+ }
+
  if(contextMenu.kind==='database'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),database=contextMenu.database;if(!p)return []
   return [{label:databaseIsOpen(p.id,database)?'关闭数据库':'打开数据库',action:()=>{if(databaseIsOpen(p.id,database))closeDatabase(p,database);else void selectDatabase(p,database)}},...([['alter','编辑数据库'],['create','新建数据库'],['drop','删除数据库'],['query','新建查询'],['console','命令行界面'],['run','运行SQL文件'],['dump','转储SQL文件'],['dictionary','数据字典'],['model','逆向数据库到模型']] as [DatabaseToolMode,string][]).map(([mode,label])=>({label,danger:mode==='drop',action:()=>showDatabaseTool(p,database,mode)})),{label:'刷新',action:async()=>{try{sessions[p.id]=await api.RefreshDatabases(p.id);if(databaseIsOpen(p.id,database)){await selectDatabase(p,database);await loadObjects()}}catch(e){showNavigationError(errorText(e))}}}]
@@ -407,7 +435,7 @@ const nativeDialogDefinitions=computed(()=>{
  const windows=[]
  if(dialogOpen.value)windows.push({key:'connection',kind:'connection' as const,title:'MySQL - '+(connectOnSave.value?'打开连接':editingID.value?'编辑连接':'新建连接'),width:580,height:580,payload:{model:form,clientVersion:connectionClientVersion.value,busy:busy.value,errors,result:testResult.value,error:testError.value,editing:!!editingID.value,connectOnSave:connectOnSave.value,fatal:!!fatalError.value,groups:connectionGroups.value}})
  if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
- if(databaseTool.value){const{profile,database,mode}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:compact?600:1000,height:compact?350:650,payload:{profile,database,mode}})}
+ if(databaseTool.value){const{profile,database,mode,table,initialSQL}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL}})}
  if(about.value)windows.push({key:'about',kind:'about' as const,title:'关于 Bajiu DB · 捌玖',width:365,height:310,payload:{}})
  if(confirm.open)windows.push({key:'confirm',kind:'confirm' as const,title:confirm.title,width:440,height:240,payload:{title:confirm.title,body:confirm.body,label:confirm.label}})
  return windows
@@ -420,7 +448,7 @@ function nativeDialogAction(key:string,event:DialogAction){
  }else if(key==='group'){if(Number(payload.clientVersion??0)>=groupClientVersion.value){groupClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(groupForm,payload.changes);else if(payload.model)Object.assign(groupForm,payload.model)};if(action==='save')void saveGroupDialog();else if(action==='cancel')closeGroupDialog()}
  else if(key==='confirm'){if(action==='accept')void acceptConfirm();else if(action==='cancel')cancelConfirm()}
  else if(key==='about'&&action==='cancel')about.value=false
- else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')databaseTool.value=null}
+ else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')closeDatabaseTool()}
 }
 useNativeDialogs(nativeDialogDefinitions,nativeDialogAction,showNavigationError)
 onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);releaseDrag?.();transientPasswords.clear()})
@@ -464,7 +492,17 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
                 <div v-if="expandedConnections.has(p.id)&&connectionHasDatabases(p.id)" role="group">
                   <template v-for="db in visibleDatabases(p)" :key="db">
                     <button class="tree-row tree-database" :class="{selected:selectedID===p.id&&databaseNodeSelected&&(selectedDatabase===db||selectedRow?.database===db)}" role="treeitem" :aria-expanded="databaseIsOpen(p.id,db)?expandedDatabases.has(p.id+'/'+db):undefined" :aria-selected="selectedID===p.id&&databaseNodeSelected&&(selectedDatabase===db||selectedRow?.database===db)" data-tree-row :title="db" @click="selectDatabaseInfo(p,db)" @contextmenu.prevent.stop="contextForDatabase($event,p,db)" @dblclick="toggleDatabase(p,db)" @keydown="treeKeys" @keydown.enter.prevent="selectDatabase(p,db)" @keydown.right.prevent="selectDatabase(p,db)" @keydown.left.prevent="expandedDatabases.delete(p.id+'/'+db)"><span v-if="databaseIsOpen(p.id,db)" class="tree-expander" @click.stop="toggleDatabase(p,db)"><ChevronDown v-if="expandedDatabases.has(p.id+'/'+db)" :size="12"/><ChevronRight v-else :size="12"/></span><span v-else class="tree-expander" aria-hidden="true"></span><Database :size="15" :class="databaseIconClass(p.id,db)"/><span class="tree-label">{{db}}</span></button>
-                    <div v-if="databaseIsOpen(p.id,db)&&expandedDatabases.has(p.id+'/'+db)" role="group"><button v-for="c in categories" :key="c[0]" class="tree-row tree-category" :class="{selected:selectedID===p.id&&selectedDatabase===db&&!databaseNodeSelected&&category===c[0]}" role="treeitem" :aria-selected="selectedID===p.id&&selectedDatabase===db&&!databaseNodeSelected&&category===c[0]" data-tree-row @click="selectDatabase(p,db,c[0])" @keydown="treeKeys" @keydown.enter.prevent="selectDatabase(p,db,c[0])"><component :is="c[2]" :size="15" :class="'category-'+c[0]"/><span>{{c[1]}}</span></button></div>
+                    <div v-if="databaseIsOpen(p.id,db)&&expandedDatabases.has(p.id+'/'+db)" role="group">
+                     <template v-for="c in categories" :key="c[0]">
+                      <button class="tree-row tree-category" :class="{selected:selectedID===p.id&&selectedDatabase===db&&!databaseNodeSelected&&category===c[0]&&!selectedObject}" role="treeitem" :aria-expanded="categoryExpandable(p,db,c[0])?expandedCategories.has(treeKey(p.id,db,c[0])):undefined" data-tree-row @click="selectDatabase(p,db,c[0])" @dblclick="toggleCategory(p,db,c[0])" @contextmenu.prevent.stop="c[0]==='tables'&&contextForTable($event,p,db)" @keydown="treeKeys" @keydown.enter.prevent="toggleCategory(p,db,c[0])" @keydown.right.prevent="toggleCategory(p,db,c[0],true)" @keydown.left.prevent="toggleCategory(p,db,c[0],false)"><span v-if="categoryExpandable(p,db,c[0])" class="tree-expander" @click.stop="toggleCategory(p,db,c[0])"><ChevronDown v-if="expandedCategories.has(treeKey(p.id,db,c[0]))" :size="12"/><ChevronRight v-else :size="12"/></span><span v-else class="tree-expander"></span><component :is="c[2]" :size="15" :class="'category-'+c[0]"/><span>{{c[1]}}</span></button>
+                      <div v-if="expandedCategories.has(treeKey(p.id,db,c[0]))" role="group">
+                       <template v-for="object in treeList(p,db,c[0])" :key="object.name">
+                        <button class="tree-row tree-table" role="treeitem" data-tree-row :aria-expanded="c[0]==='tables'&&(!treeColumns[treeKey(p.id,db,object.name)]||treeColumns[treeKey(p.id,db,object.name)]?.length)?expandedTables.has(treeKey(p.id,db,object.name)):undefined" :class="{selected:selectedID===p.id&&selectedDatabase===db&&category===c[0]&&selectedObject?.name===object.name}" @click="selectTreeObject(p,db,c[0],object)" @dblclick="c[0]==='tables'&&toggleTable(p,db,object)" @contextmenu.prevent.stop="c[0]==='tables'&&contextForTable($event,p,db,object)" @keydown="treeKeys" @keydown.enter.prevent="selectTreeObject(p,db,c[0],object)" @keydown.right.prevent="c[0]==='tables'&&toggleTable(p,db,object,true)" @keydown.left.prevent="toggleTable(p,db,object,false)"><span class="tree-expander" @click.stop="c[0]==='tables'&&toggleTable(p,db,object)"><template v-if="c[0]==='tables'&&(!treeColumns[treeKey(p.id,db,object.name)]||treeColumns[treeKey(p.id,db,object.name)]?.length)"><ChevronDown v-if="expandedTables.has(treeKey(p.id,db,object.name))" :size="12"/><ChevronRight v-else :size="12"/></template></span><component :is="c[2]" :size="14" :class="'category-'+c[0]"/><span class="tree-label">{{object.name}}</span><LoaderCircle v-if="treeLoading.has(treeKey(p.id,db,object.name))" :size="12" class="spin"/></button>
+                        <div v-if="c[0]==='tables'&&expandedTables.has(treeKey(p.id,db,object.name))" role="group"><div v-for="column in treeColumns[treeKey(p.id,db,object.name)]" :key="column[0]??''" class="tree-row tree-column" role="treeitem" :title="column[8]??''"><span class="column-key">{{column[4]==='PRI'?'◆':'•'}}</span><span class="tree-label">{{column[0]}} <small>{{column[1]}}</small></span></div></div>
+                       </template>
+                      </div>
+                     </template>
+                    </div>
                   </template>
                   <p v-if="sessions[p.id].databases.length===0" class="tree-caption">没有可访问的数据库</p>
                 </div>
@@ -493,7 +531,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
       </div>
       <footer class="application-statusbar"><span>{{selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span class="status-context" v-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
-    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" @close="databaseTool=null" @changed="databaseChanged"/>
+    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" @close="closeDatabaseTool" @changed="databaseChanged"/>
     <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
     <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
     <div v-if="contextMenu.open" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>

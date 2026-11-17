@@ -76,7 +76,7 @@ func TestMySQLIntegration(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "拒绝登录") {
 		t.Fatal("authentication error not classified", err)
 	}
-	if strings.Contains(err.Error(), password) || strings.Contains(err.Error(), "wrong-password-test-only") {
+	if (password != "" && strings.Contains(err.Error(), password)) || strings.Contains(err.Error(), "wrong-password-test-only") {
 		t.Fatal("password leaked into error")
 	}
 	in.TLSMode = "verify"
