@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {vDraggableDialog} from './draggableDialog'
 import { nextTick, onMounted } from 'vue'
 import { Folder, X, LoaderCircle } from '@lucide/vue'
 import type { ConnectionGroup } from './api'
@@ -14,7 +15,7 @@ onMounted(()=>nextTick(()=>document.getElementById('group-dialog-value')?.focus(
 
 <template>
  <div class="confirmation-overlay">
-  <section class="group-dialog" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title" @keydown.tab="trap">
+  <section v-draggable-dialog class="group-dialog" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title" @keydown.tab="trap">
    <header class="dialog-titlebar"><Folder :size="16" class="folder-icon"/><h2 id="group-dialog-title">移至分组</h2><button class="window-close" aria-label="关闭分组窗口" @click="emit('cancel')" :disabled="busy"><X :size="16"/></button></header>
    <form @submit.prevent="emit('save')">
     <div class="group-dialog-content">

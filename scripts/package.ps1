@@ -14,6 +14,8 @@ function Remove-Output([string]$Path, [string]$Root) {
 }
 
 & (Join-Path $PSScriptRoot 'build.ps1') -OutputFile 'BajiuDB-package.exe'
+& node (Join-Path $PSScriptRoot 'collect-licenses.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'License collection failed.' }
 $version = (Get-Content -LiteralPath (Join-Path $projectDir 'wails.json') -Raw | ConvertFrom-Json).info.productVersion
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid product version.' }
 $name = "BajiuDB-$version-windows-x64"

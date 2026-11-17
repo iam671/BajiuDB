@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {vDraggableDialog} from './draggableDialog'
 import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue'
 import {X,Play,Square,FolderOpen,Save,Database,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile} from './api'
@@ -16,6 +17,7 @@ async function request(request:AdminRequest){task=crypto.randomUUID();try{return
 async function perform(action:()=>Promise<void>){if(running.value)return;running.value=true;error.value='';message.value='';try{await action()}catch(e){error.value=errorText(e)}finally{running.value=false}}
 async function cancel(){if(task)try{await api.CancelDatabaseTask(task)}catch(e){error.value=errorText(e)}}
 function close(){if(running.value){void cancel();return}emit('close')}
+defineExpose({requestClose:close})
 function trap(event:KeyboardEvent){const nodes=Array.from(windowRef.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')??[]).filter(el=>el.getClientRects().length);if(event.shiftKey&&document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1)?.focus()}else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0]?.focus()}}
 async function loadFile(){await perform(async()=>{const chosen=await api.OpenSQLFile();if(!chosen.path)return;file.value=chosen.path;sql.value=chosen.text;statements.value=chosen.statements;result.value=null})}
 async function execute(){
@@ -34,14 +36,14 @@ async function saveReport(extension:string,text:string){const path=await api.Sav
 async function saveSchema(){await perform(async()=>{const response=await request({operation:props.mode,name:name.value,charset:charset.value,collation:collation.value});if(response.error)throw new Error(response.error);emit('changed',props.mode,name.value);emit('close')})}
 async function dump(){await perform(async()=>{const response=await request({operation:'dump',includeData:includeData.value});result.value=response;await saveReport('sql',response.text)})}
 onMounted(async()=>{
- await nextTick();windowRef.value?.querySelector<HTMLElement>('input,textarea,button')?.focus()
+ await nextTick();(editor.value??Array.from(windowRef.value?.querySelectorAll<HTMLElement>('input,select,textarea,button')??[]).find(el=>el.getClientRects().length))?.focus()
  if(props.mode==='create'||props.mode==='alter')await perform(async()=>{catalog.value=(await request({operation:'catalog'})).results[0]?.rows??[];selectCharset();if(props.mode==='alter'){const schema=(await request({operation:'schema'})).results[0]?.rows[0];if(schema){charset.value=schema[0]??'';collation.value=schema[1]??''}}})
  if(props.mode==='dictionary'||props.mode==='model')await perform(async()=>{result.value=await request({operation:props.mode});if(props.mode==='model')svg.value=modelSVG(props.database,result.value)})
 })
 onUnmounted(()=>{if(task)void api.CancelDatabaseTask(task)})
 </script>
 <template>
- <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode)}" role="dialog" aria-modal="true" :aria-label="names[mode]">
+ <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode)}" role="dialog" aria-modal="true" :aria-label="names[mode]">
   <header><Database :size="16"/><h2>{{names[mode]}} · {{profile.name}}<template v-if="mode!=='create'"> / {{database}}</template></h2><button class="tiny-button" aria-label="关闭数据库工具" @click="close"><X :size="17"/></button></header>
   <div class="db-tools-body">
    <template v-if="mode==='create'||mode==='alter'"><p class="db-tools-note">{{mode==='alter'?'修改数据库默认字符集和排序规则，不会重命名数据库或转换已有表的数据。':'创建一个空数据库，权限由当前 MySQL 账户决定。'}}</p><div class="db-schema-form"><label for="schema-name">数据库名</label><input id="schema-name" v-model="name" :disabled="mode==='alter'||running" maxlength="64"/><label for="schema-charset">字符集</label><select id="schema-charset" v-model="charset" @change="selectCharset" :disabled="running"><option v-for="value in charsets" :key="value">{{value}}</option></select><label for="schema-collation">排序规则</label><select id="schema-collation" v-model="collation" :disabled="running"><option v-for="value in collations" :key="value">{{value}}</option></select></div></template>

@@ -15,6 +15,8 @@ export interface ConnectionGroup {id:string;name:string}
 export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;includeData?:boolean}
 export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
 export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string}
+export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database';title:string;width:number;height:number;payload:any;revision?:number}
+export interface DialogAction {id:string;action:string;payload:any}
 type Bridge = {
   ListGroups():Promise<ConnectionGroup[]>; SaveGroup(id:string,name:string):Promise<ConnectionGroup>;
   DeleteGroup(id:string):Promise<void>;
@@ -30,12 +32,16 @@ type Bridge = {
   DatabaseAdmin(task:string,id:string,database:string,request:AdminRequest):Promise<AdminResult>;
   CancelDatabaseTask(task:string):Promise<void>;OpenSQLFile():Promise<{path:string;text:string;statements:number}>;
   SaveDatabaseReport(name:string,text:string):Promise<string>;
+  OpenWindowDialog(state:WindowDialog):Promise<void>;GetWindowDialog(id:string):Promise<WindowDialog>;UpdateWindowDialog(state:WindowDialog):Promise<void>;CloseWindowDialog(id:string):Promise<void>;SendWindowDialogAction(action:DialogAction):Promise<void>;
 }
 declare global { interface Window {go?:{main:{App:Bridge}}} }
-export const isDesktop = () => !!window.go?.main?.App
+let nativeCall:((name:string,...args:unknown[])=>Promise<unknown>)|undefined
+export function installNativeBridge(call:typeof nativeCall){nativeCall=call}
+export const hasNativeWindows=()=>!!nativeCall
+export const isDesktop = () => !!window.go?.main?.App||!!nativeCall
 export const api = new Proxy({} as Bridge,{get(_target,key){return (...args:unknown[])=>{
   const bridge = window.go?.main?.App
-  if(!bridge) return Promise.reject(new Error('这是界面预览。请打开 Bajiu DB 桌面程序管理真实连接。'))
+  if(!bridge){if(nativeCall)return nativeCall('main.App.'+String(key),...args);return Promise.reject(new Error('这是界面预览。请打开 Bajiu DB 桌面程序管理真实连接。'))}
   const fn = bridge[key as keyof Bridge] as (...args:unknown[])=>unknown
   return fn(...args)
 }}})

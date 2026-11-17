@@ -11,15 +11,14 @@ try {
     if ($config.info.productVersion -ne $package.version -or $lockVersions[0] -ne $package.version -or $lockVersions[1] -ne $package.version) {
         throw 'Product versions differ. Keep Wails, package.json and package-lock.json consistent.'
     }
-    $wailsCommand = Get-Command wails -ErrorAction SilentlyContinue
-    $workspaceCLI = [IO.Path]::GetFullPath((Join-Path $projectDir '../../.local/tools/wails.exe'))
-    if ($wailsCommand) {
-        & $wailsCommand.Source build -o $OutputFile -trimpath -ldflags '-s -w'
-    } elseif (Test-Path -LiteralPath $workspaceCLI) {
-        & $workspaceCLI build -o $OutputFile -trimpath -ldflags '-s -w'
-    } else {
-        go run github.com/wailsapp/wails/v2/cmd/wails@v2.11.0 build -o $OutputFile -trimpath -ldflags '-s -w'
-    }
+    npm ci --prefix frontend
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed.' }
+    npm run build --prefix frontend
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+    go run ./tools/resourcegen
+    if ($LASTEXITCODE -ne 0) { throw 'Windows resource generation failed.' }
+    New-Item -ItemType Directory -Force build/bin | Out-Null
+    go build -tags production -trimpath -ldflags '-s -w -H windowsgui' -o "build/bin/$OutputFile" .
     if ($LASTEXITCODE -ne 0) { throw 'Bajiu DB build failed.' }
     Get-Item -LiteralPath (Join-Path $projectDir "build\bin\$OutputFile") -ErrorAction SilentlyContinue | Select-Object FullName, Length
 } finally {

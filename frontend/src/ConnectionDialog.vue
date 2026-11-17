@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { Database, X, LoaderCircle, FolderOpen, Eye, EyeOff, CheckCircle2, AlertCircle } from '@lucide/vue'
 import type { ConnectionInput, TestResult, ConnectionGroup } from './api'
 import { APP_ICON } from './api'
+import {vDraggableDialog} from './draggableDialog'
 
 const props = defineProps<{
   model:ConnectionInput; busy:string; errors:Record<string,string>; result:TestResult|null;
@@ -15,19 +16,6 @@ const emit = defineEmits<{
 const tab = ref('general')
 const visiblePassword = ref(false)
 const tabs = [{id:'general',label:'常规'},{id:'advanced',label:'高级'},{id:'databases',label:'数据库'},{id:'ssl',label:'SSL'},{id:'ssh',label:'SSH'},{id:'http',label:'HTTP'}]
-const offset=reactive({x:0,y:0})
-let stopDrag:(()=>void)|undefined
-function centerDialog(){offset.x=0;offset.y=0}
-function startDialogDrag(event:PointerEvent){
- if(event.button!==0||(event.target as HTMLElement).closest('button'))return
- event.preventDefault();stopDrag?.()
- const x=event.clientX,y=event.clientY,startX=offset.x,startY=offset.y,id=event.pointerId
- const handle=event.currentTarget as HTMLElement;handle.setPointerCapture?.(id)
- const move=(e:PointerEvent)=>{if(e.pointerId===id){offset.x=startX+e.clientX-x;offset.y=startY+e.clientY-y}}
- const stop=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',stop);document.removeEventListener('pointercancel',stop);if(handle.hasPointerCapture?.(id))handle.releasePointerCapture(id);stopDrag=undefined}
- stopDrag=stop;document.addEventListener('pointermove',move);document.addEventListener('pointerup',stop);document.addEventListener('pointercancel',stop)
-}
-onUnmounted(()=>stopDrag?.())
 function focusFirst(){nextTick(()=>document.getElementById('connection-name')?.focus())}
 function trap(e:KeyboardEvent){const nodes=Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')).filter(el=>el.getClientRects().length);const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
 function selectTab(id:string){tab.value=id;nextTick(()=>document.getElementById('connection-tabs-'+id)?.focus())}
@@ -39,8 +27,8 @@ onMounted(focusFirst)
 
 <template>
   <div class="connection-overlay">
-    <section class="connection-dialog" :style="{transform:'translate('+offset.x+'px,'+offset.y+'px)'}" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" @keydown.tab="trap" @keydown.alt.home.prevent.stop="centerDialog">
-      <header class="dialog-titlebar connection-drag-handle" @pointerdown="startDialogDrag" @dblclick="centerDialog" title="拖动标题栏移动，双击标题栏或 Alt+Home 居中"><Database :size="15" class="mysql-color"/><h2 id="connection-dialog-title">MySQL - {{connectOnSave?'打开连接':editing?'编辑连接':'新建连接'}}</h2><button type="button" class="window-close" aria-label="关闭连接窗口" @click="emit('cancel')" :disabled="!!busy"><X :size="16"/></button></header>
+    <section v-draggable-dialog class="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" @keydown.tab="trap">
+      <header class="dialog-titlebar connection-drag-handle" title="拖动标题栏移动，双击标题栏或 Alt+Home 居中"><Database :size="15" class="mysql-color"/><h2 id="connection-dialog-title">MySQL - {{connectOnSave?'打开连接':editing?'编辑连接':'新建连接'}}</h2><button type="button" class="window-close" aria-label="关闭连接窗口" @click="emit('cancel')" :disabled="!!busy"><X :size="16"/></button></header>
       <form class="dialog-form" @submit.prevent="emit('save')">
         <div class="connection-tabbar" role="tablist" aria-label="连接设置分页" @keydown="tabKey">
           <button v-for="t in tabs" :key="t.id" type="button" role="tab" :id="'connection-tabs-'+t.id" :aria-controls="'connection-panel-'+t.id" :aria-selected="tab===t.id" :tabindex="tab===t.id?0:-1" :class="{active:tab===t.id}" @click="tab=t.id" :disabled="!!busy">{{t.label}}</button>

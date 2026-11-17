@@ -4,7 +4,6 @@ import (
 	"bajiudb/internal/connections"
 	"context"
 	"errors"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,7 +52,7 @@ type SQLFile struct {
 }
 
 func (a *App) OpenSQLFile() (SQLFile, error) {
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择要运行的 SQL 文件", Filters: []runtime.FileFilter{{DisplayName: "SQL 文件（UTF-8）", Pattern: "*.sql"}}})
+	path, err := a.desktop.Dialog.OpenFile().SetTitle("选择要运行的 SQL 文件").AddFilter("SQL 文件（UTF-8）", "*.sql").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 	if err != nil || path == "" {
 		return SQLFile{}, err
 	}
@@ -84,7 +83,7 @@ func (a *App) SaveDatabaseReport(name, text string) (string, error) {
 	if ext != ".sql" && ext != ".html" && ext != ".svg" {
 		return "", errors.New("不支持的导出格式")
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{Title: "保存数据库文件", DefaultFilename: name, Filters: []runtime.FileFilter{{DisplayName: "数据库文件", Pattern: "*" + ext}}})
+	path, err := a.desktop.Dialog.SaveFile().SetFilename(name).AddFilter("数据库文件", "*"+ext).AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 	if err != nil || path == "" {
 		return "", err
 	}

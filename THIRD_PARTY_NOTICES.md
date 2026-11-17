@@ -5,41 +5,24 @@ Frameworks, icons and database drivers retain their own licences. This file does
 ## Go dependencies
 
 - filippo.io/edwards25519 v1.2.0: licences in licenses/filippo.io_edwards25519-v1.2.0/
-- github.com/bep/debounce v1.2.1: licences in licenses/github.com_bep_debounce-v1.2.1/
+- github.com/coder/websocket v1.8.14: licences in licenses/github.com_coder_websocket-v1.8.14/
 - github.com/danieljoos/wincred v1.2.3: licences in licenses/github.com_danieljoos_wincred-v1.2.3/
 - github.com/davecgh/go-spew v1.1.1: licences in licenses/github.com_davecgh_go-spew-v1.1.1/
+- github.com/ebitengine/purego v0.11.1: licences in licenses/github.com_ebitengine_purego-v0.11.1/
 - github.com/go-ole/go-ole v1.3.0: licences in licenses/github.com_go-ole_go-ole-v1.3.0/
 - github.com/go-sql-driver/mysql v1.10.1: licences in licenses/github.com_go-sql-driver_mysql-v1.10.1/
 - github.com/godbus/dbus/v5 v5.2.2: licences in licenses/github.com_godbus_dbus_v5-v5.2.2/
-- github.com/google/uuid v1.6.0: licences in licenses/github.com_google_uuid-v1.6.0/
-- github.com/gorilla/websocket v1.5.3: licences in licenses/github.com_gorilla_websocket-v1.5.3/
-- github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e: licences in licenses/github.com_jchv_go-winloader-v0.0.0-20210711035445-715c2860da7e/
-- github.com/labstack/echo/v4 v4.13.3: licences in licenses/github.com_labstack_echo_v4-v4.13.3/
-- github.com/labstack/gommon v0.4.2: licences in licenses/github.com_labstack_gommon-v0.4.2/
-- github.com/leaanthony/debme v1.2.1: licences in licenses/github.com_leaanthony_debme-v1.2.1/
-- github.com/leaanthony/go-ansi-parser v1.6.1: licences in licenses/github.com_leaanthony_go-ansi-parser-v1.6.1/
-- github.com/leaanthony/gosod v1.0.4: licences in licenses/github.com_leaanthony_gosod-v1.0.4/
-- github.com/leaanthony/slicer v1.6.0: licences in licenses/github.com_leaanthony_slicer-v1.6.0/
-- github.com/leaanthony/u v1.1.1: licences in licenses/github.com_leaanthony_u-v1.1.1/
-- github.com/matryer/is v1.4.1: licences in licenses/github.com_matryer_is-v1.4.1/
-- github.com/mattn/go-colorable v0.1.13: licences in licenses/github.com_mattn_go-colorable-v0.1.13/
-- github.com/mattn/go-isatty v0.0.20: licences in licenses/github.com_mattn_go-isatty-v0.0.20/
-- github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c: licences in licenses/github.com_pkg_browser-v0.0.0-20240102092130-5ac0b6a4141c/
-- github.com/pkg/errors v0.9.1: licences in licenses/github.com_pkg_errors-v0.9.1/
+- github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646: licences in licenses/github.com_nfnt_resize-v0.0.0-20180221191011-83c6a9932646/
 - github.com/pmezard/go-difflib v1.0.0: licences in licenses/github.com_pmezard_go-difflib-v1.0.0/
-- github.com/rivo/uniseg v0.4.7: licences in licenses/github.com_rivo_uniseg-v0.4.7/
-- github.com/samber/lo v1.49.1: licences in licenses/github.com_samber_lo-v1.49.1/
 - github.com/stretchr/objx v0.5.2: licences in licenses/github.com_stretchr_objx-v0.5.2/
 - github.com/stretchr/testify v1.11.1: licences in licenses/github.com_stretchr_testify-v1.11.1/
-- github.com/tkrajina/go-reflector v0.5.8: licences in licenses/github.com_tkrajina_go-reflector-v0.5.8/
-- github.com/valyala/bytebufferpool v1.0.0: licences in licenses/github.com_valyala_bytebufferpool-v1.0.0/
-- github.com/valyala/fasttemplate v1.2.2: licences in licenses/github.com_valyala_fasttemplate-v1.2.2/
-- github.com/wailsapp/go-webview2 v1.0.22: licences in licenses/github.com_wailsapp_go-webview2-v1.0.22/
-- github.com/wailsapp/mimetype v1.4.1: licences in licenses/github.com_wailsapp_mimetype-v1.4.1/
-- github.com/wailsapp/wails/v2 v2.11.0: licences in licenses/github.com_wailsapp_wails_v2-v2.11.0/
+- github.com/tc-hib/winres v0.3.1: licences in licenses/github.com_tc-hib_winres-v0.3.1/
+- github.com/wailsapp/wails/v3 v3.1.0: licences in licenses/github.com_wailsapp_wails_v3-v3.1.0/
 - github.com/zalando/go-keyring v0.2.8: licences in licenses/github.com_zalando_go-keyring-v0.2.8/
 - golang.org/x/crypto v0.59.0: licences in licenses/golang.org_x_crypto-v0.59.0/
+- golang.org/x/image v0.45.0: licences in licenses/golang.org_x_image-v0.45.0/
 - golang.org/x/sys v0.50.0: licences in licenses/golang.org_x_sys-v0.50.0/
+- golang.org/x/term v0.48.0: licences in licenses/golang.org_x_term-v0.48.0/
 - gopkg.in/yaml.v3 v3.0.1: licences in licenses/gopkg.in_yaml.v3-v3.0.1/
 
 ## Frontend runtime dependencies
@@ -50,6 +33,7 @@ Frameworks, icons and database drivers retain their own licences. This file does
 - @vue/runtime-core 3.5.45: MIT; licences in licenses/@vue_runtime-core-3.5.45/
 - @vue/runtime-dom 3.5.45: MIT; licences in licenses/@vue_runtime-dom-3.5.45/
 - @lucide/vue 1.73.0: ISC; licences in licenses/@lucide_vue-1.73.0/
+- @wailsio/runtime 3.1.0: MIT; licences in licenses/@wailsio_runtime-3.1.0/
 
 ## MySQL driver source availability
 

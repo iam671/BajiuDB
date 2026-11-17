@@ -3,21 +3,29 @@ package main
 import (
 	"bajiudb/internal/connections"
 	"context"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 type App struct {
-	ctx        context.Context
-	service    *connections.Service
-	configPath string
-	startupErr error
+	ctx            context.Context
+	service        *connections.Service
+	configPath     string
+	startupErr     error
+	desktop        *application.App
+	mainWindow     *application.WebviewWindow
+	dialogMu       sync.Mutex
+	dialogs        map[string]*nativeDialog
+	stop           context.CancelFunc
+	dialogSequence uint64
 }
 
 func NewApp() *App {
 	dir, err := os.UserConfigDir()
-	app := &App{startupErr: err}
+	ctx, stop := context.WithCancel(context.Background())
+	app := &App{startupErr: err, ctx: ctx, stop: stop, dialogs: map[string]*nativeDialog{}}
 	if err == nil {
 		app.configPath = filepath.Join(dir, "BajiuDB", "connections.json")
 		app.service = connections.New(connections.FileStore{Path: app.configPath}, connections.SystemSecrets{}, connections.MySQLDialer{})
@@ -25,8 +33,10 @@ func NewApp() *App {
 	return app
 }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
-func (a *App) shutdown(context.Context) {
+func (a *App) shutdown() {
+	if a.stop != nil {
+		a.stop()
+	}
 	if a.service != nil {
 		a.service.Close()
 	}
@@ -92,7 +102,7 @@ func (a *App) TableDDL(id, database, table string) (string, error) {
 	return a.service.TableDDL(id, database, table)
 }
 func (a *App) SelectSSHKey() (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择 SSH 私钥", Filters: []runtime.FileFilter{{DisplayName: "SSH 私钥", Pattern: "*"}}})
+	return a.desktop.Dialog.OpenFile().SetTitle("选择 SSH 私钥").AddFilter("SSH 私钥", "*").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 }
 func (a *App) ListGroups() ([]connections.Group, error) {
 	if a.startupErr != nil {
@@ -123,7 +133,7 @@ func (a *App) DeleteGroup(id string) error {
 	}
 	return a.service.DeleteGroup(id)
 }
-func (a *App) QuitApp() { runtime.Quit(a.ctx) }
+func (a *App) QuitApp() { a.desktop.Quit() }
 func (a *App) SelectCAFile() (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择 CA 证书", Filters: []runtime.FileFilter{{DisplayName: "PEM 证书", Pattern: "*.pem;*.crt;*.cer"}}})
+	return a.desktop.Dialog.OpenFile().SetTitle("选择 CA 证书").AddFilter("PEM 证书", "*.pem;*.crt;*.cer").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 }

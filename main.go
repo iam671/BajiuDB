@@ -2,34 +2,35 @@ package main
 
 import (
 	"embed"
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 	"log"
-	goruntime "runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+var instanceID = "b20cd936-a701-4eed-95d0-82cd44372f09"
+var windowTrace = ""
+
 func main() {
 	app := NewApp()
-	m := menu.NewMenu()
-	if goruntime.GOOS == "darwin" {
-		m.Append(menu.AppMenu())
-		m.Append(menu.EditMenu())
+	app.desktop = application.New(application.Options{Name: "Bajiu DB", Icon: appIcon, Description: "Bajiu DB · 捌玖", Services: []application.Service{application.NewService(app)}, Assets: application.AssetOptions{Handler: application.BundledAssetFileServer(assets)}, OnShutdown: app.shutdown, SingleInstance: &application.SingleInstanceOptions{UniqueID: instanceID, OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+		if app.mainWindow != nil {
+			app.mainWindow.Restore()
+			app.updateModalWindows()
+		}
+	}}})
+	app.mainWindow = app.desktop.Window.NewWithOptions(application.WebviewWindowOptions{Name: "main", Title: "Bajiu DB · 捌玖", Width: 1240, Height: 820, MinWidth: 960, MinHeight: 680, URL: "/?desktop=1", BackgroundColour: application.NewRGB(245, 247, 250), Windows: application.WindowsWindow{Theme: application.Light}})
+	app.mainWindow.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) { app.desktop.Quit() })
+	if windowTrace == "1" {
+		for _, event := range []events.WindowEventType{events.Common.WindowDidMove, events.Common.WindowDidResize, events.Common.WindowRuntimeReady} {
+			app.mainWindow.OnWindowEvent(event, func(*application.WindowEvent) { app.traceWindows() })
+		}
 	}
-	if err := wails.Run(&options.App{
-		Title: "Bajiu DB · 捌玖", Width: 1240, Height: 820, MinWidth: 960, MinHeight: 680,
-		BackgroundColour: options.NewRGB(245, 247, 250),
-		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        app.startup, OnShutdown: app.shutdown, Bind: []interface{}{app}, Menu: m,
-		SingleInstanceLock: &options.SingleInstanceLock{UniqueId: "b20cd936-a701-4eed-95d0-82cd44372f09", OnSecondInstanceLaunch: func(_ options.SecondInstanceData) { runtime.WindowUnminimise(app.ctx); runtime.Show(app.ctx) }},
-		Windows:            &windows.Options{Theme: windows.Light, DisablePinchZoom: true},
-	}); err != nil {
+	if err := app.desktop.Run(); err != nil {
 		log.Print("Bajiu DB 无法启动: ", err)
 	}
 }

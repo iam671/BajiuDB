@@ -5,8 +5,11 @@ import ConnectionDialog from './ConnectionDialog.vue'
 import GroupDialog from './GroupDialog.vue'
 import InlineGroupEditor from './InlineGroupEditor.vue'
 import DatabaseTools, {type DatabaseToolMode} from './DatabaseTools.vue'
-import { version as appVersion } from '../package.json'
-import { APP_ICON, api, defaults, fromProfile, errorText, isDesktop, type Profile, type ConnectionInput, type ConnectionGroup, type SessionInfo, type DatabaseObject, type TestResult } from './api'
+import ConfirmationDialog from './ConfirmationDialog.vue'
+import AboutDialog from './AboutDialog.vue'
+import {useNativeDialogs} from './nativeDialogs'
+import {hasNativeWindows,type DialogAction} from './api'
+import { api, defaults, fromProfile, errorText, isDesktop, type Profile, type ConnectionInput, type ConnectionGroup, type SessionInfo, type DatabaseObject, type TestResult } from './api'
 
 type Category = 'tables'|'views'|'functions'|'events'
 type WorkspaceRow = { key:string; name:string; kind:'connection'|'database'|Category; profile?:Profile; database?:string; object?:DatabaseObject }
@@ -51,6 +54,7 @@ const loading = ref(true)
 const fatalError = ref('')
 const configPath = ref('')
 const desktop = ref(isDesktop())
+const nativeWindows=hasNativeWindows()
 const menu = ref('')
 const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database',database:'',connectionID:''})
 const databaseTool=ref<{profile:Profile;database:string;mode:DatabaseToolMode}|null>(null)
@@ -63,6 +67,7 @@ const connectionDragType='application/x-bajiu-connection'
 const form = reactive(defaults())
 const baseline = ref(JSON.stringify(form))
 const dialogOpen = ref(false)
+const connectionClientVersion=ref(0),groupClientVersion=ref(0)
 const editingID = ref('')
 const connectOnSave = ref(false)
 const dialogRef = ref<InstanceType<typeof ConnectionDialog>|null>(null)
@@ -125,6 +130,7 @@ function closeDialog(){dialogOpen.value=false;clearFeedback();Object.assign(form
 function cancelDialog(){if(busy.value)return;if(dirty.value)ask('放弃未保存的修改？','此连接的修改尚未保存。是否放弃这些修改并关闭窗口？','放弃修改',closeDialog,true);else closeDialog()}
 function openDialog(p?:Profile,connect=false){
   if(busy.value)return
+  connectionClientVersion.value=0
   returnFocus=document.activeElement as HTMLElement
   clearFeedback();menu.value='';contextMenu.open=false
   Object.assign(form,p?fromProfile(p):defaults())
@@ -180,6 +186,7 @@ async function dropConnection(e:DragEvent,target:string){
 }
 function showGroupDialog(){
  if(busy.value)return
+ groupClientVersion.value=0
  returnFocus=document.activeElement as HTMLElement;closeMenus();groupError.value=''
  groupConnection=selected.value
  groupForm.groupId=groupConnection?.groupId??''
@@ -396,6 +403,26 @@ onMounted(async()=>{
  try{if(desktop.value){connectionGroups.value=await api.ListGroups();for(const g of connectionGroups.value)expandedGroups.add(g.id);profiles.value=await api.ListConnections();configPath.value=await api.ConfigPath();for(const session of await api.ListSessions())sessions[session.id]=session}}catch(e){fatalError.value=errorText(e)}finally{loading.value=false}
  poll=setInterval(async()=>{if(!desktop.value||busy.value)return;try{const list=await api.ListSessions();const ids=new Set(list.map(s=>s.id));for(const id of Object.keys(sessions))if(!ids.has(id)){delete sessions[id];clearDatabaseState(id);expandedConnections.delete(id);if(id===selectedID.value){selectedDatabase.value='';invalidateObjects()}}}catch{/* explicit refresh reports connection errors */}},15000)
 })
+const nativeDialogDefinitions=computed(()=>{
+ const windows=[]
+ if(dialogOpen.value)windows.push({key:'connection',kind:'connection' as const,title:'MySQL - '+(connectOnSave.value?'打开连接':editingID.value?'编辑连接':'新建连接'),width:580,height:580,payload:{model:form,clientVersion:connectionClientVersion.value,busy:busy.value,errors,result:testResult.value,error:testError.value,editing:!!editingID.value,connectOnSave:connectOnSave.value,fatal:!!fatalError.value,groups:connectionGroups.value}})
+ if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
+ if(databaseTool.value){const{profile,database,mode}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:compact?600:1000,height:compact?350:650,payload:{profile,database,mode}})}
+ if(about.value)windows.push({key:'about',kind:'about' as const,title:'关于 Bajiu DB · 捌玖',width:365,height:310,payload:{}})
+ if(confirm.open)windows.push({key:'confirm',kind:'confirm' as const,title:confirm.title,width:440,height:240,payload:{title:confirm.title,body:confirm.body,label:confirm.label}})
+ return windows
+})
+function nativeDialogAction(key:string,event:DialogAction){
+ const action=event.action,payload=event.payload??{}
+ if(key==='connection'){
+  if(Number(payload.clientVersion??0)>=connectionClientVersion.value){connectionClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(form,payload.changes);else if(payload.model)Object.assign(form,payload.model)}
+  if(action==='save')void saveDialog();else if(action==='test')void testConnection();else if(action==='cancel')cancelDialog();else if(action==='password')passwordChanged();else if(action==='forget')forgetPassword();else if(action==='chooseCA')void chooseCA();else if(action==='chooseSSHKey')void chooseSSHKey()
+ }else if(key==='group'){if(Number(payload.clientVersion??0)>=groupClientVersion.value){groupClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(groupForm,payload.changes);else if(payload.model)Object.assign(groupForm,payload.model)};if(action==='save')void saveGroupDialog();else if(action==='cancel')closeGroupDialog()}
+ else if(key==='confirm'){if(action==='accept')void acceptConfirm();else if(action==='cancel')cancelConfirm()}
+ else if(key==='about'&&action==='cancel')about.value=false
+ else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')databaseTool.value=null}
+}
+useNativeDialogs(nativeDialogDefinitions,nativeDialogAction,showNavigationError)
 onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);releaseDrag?.();transientPasswords.clear()})
 </script>
 
@@ -466,11 +493,12 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
       </div>
       <footer class="application-statusbar"><span>{{selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span class="status-context" v-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
-    <DatabaseTools v-if="databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" @close="databaseTool=null" @changed="databaseChanged"/>
-    <ConnectionDialog v-if="dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
-    <GroupDialog v-if="groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
+    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" @close="databaseTool=null" @changed="databaseChanged"/>
+    <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
+    <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
     <div v-if="contextMenu.open" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>
-    <div v-if="confirm.open" class="confirmation-overlay" @keydown.tab="trap"><section class="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-text"><header><AlertCircle :size="16"/><h2 id="confirmation-title">{{confirm.title}}</h2></header><p id="confirmation-text">{{confirm.body}}</p><footer><button class="native-button" data-confirm-cancel @click="cancelConfirm">取消</button><button class="native-button default-button" @click="acceptConfirm">{{confirm.label}}</button></footer></section></div>
-    <div v-if="about" class="confirmation-overlay" @keydown.tab="trap"><section class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title"><img :src="APP_ICON" alt="" width="52" height="52"/><h2 id="about-title">Bajiu DB · 捌玖</h2><p>版本 {{appVersion}}</p><p>MySQL 连接与数据库对象浏览工具</p><button class="native-button default-button" data-about-close @click="about=false">确定</button></section></div>
+    <ConfirmationDialog v-if="!nativeWindows&&confirm.open" :title="confirm.title" :body="confirm.body" :label="confirm.label" @cancel="cancelConfirm" @accept="acceptConfirm"/>
+    <AboutDialog v-if="!nativeWindows&&about" @close="about=false"/>
+
   </div>
 </template>
