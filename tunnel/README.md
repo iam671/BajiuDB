@@ -36,3 +36,5 @@ PHP TLS 参数依据官方 [mysqli::ssl_set](https://www.php.net/manual/en/mysql
 SSH 使用密码或 OpenSSH/PEM 私钥，可填写加密私钥的口令。主机信任使用本机 `.ssh/known_hosts`、指定 known_hosts 文件，或事先向管理员核对的 SHA256 指纹。没有自动接受未知主机密钥的路径。
 
 常规页的 MySQL 地址从 SSH 服务器出发访问。例如 MySQL 与 SSH 位于同一机器，常规页可填 `127.0.0.1:3306`，SSH 页填公网 SSH 主机与 SSH 账户。SSH 服务须允许 `direct-tcpip` 转发。SSH 与 PHP 中转二选一。
+
+SQL 执行失败会向已认证客户端返回 MySQL 错误编号和服务器详细消息，便于查看语法位置；详情仅在客户端展示，不写入应用日志。已有 PHP 中转部署需替换本包的 admin.php 才能收到完整详情。

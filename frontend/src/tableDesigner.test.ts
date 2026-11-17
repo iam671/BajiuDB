@@ -1,8 +1,16 @@
 import {describe,it,expect} from 'vitest'
-import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid,fieldDefaultInput,setFieldDefaultInput} from './tableDesigner'
+import {parseDesign,designSQL,newDesign,newField,quoteText,convertSQLStrings,renameReferences,triggerScript,uid,fieldDefaultInput,setFieldDefaultInput,sameTableDDL} from './tableDesigner'
 const fixture="CREATE TABLE `items` (\n `id` bigint unsigned NOT NULL AUTO_INCREMENT,\n `title` varchar(80) NOT NULL DEFAULT 'O''Brien' COMMENT 'name',\n `calc` int GENERATED ALWAYS AS ((length(`title`) + 1)) VIRTUAL,\n PRIMARY KEY (`id`),\n KEY `idx_title` (`title`(20)) COMMENT 'prefix',\n CONSTRAINT `check_title` CHECK ((length(`title`) > 0))\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='table'"
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v))
 describe('table designer SQL',()=>{
+ it('ignores table counter movement without hiding real column, comment or auto-increment changes',()=>{
+  const before="CREATE TABLE `items` (`id` int AUTO_INCREMENT, `note` varchar(80) COMMENT 'AUTO_INCREMENT=12', PRIMARY KEY (`id`)) ENGINE=InnoDB AUTO_INCREMENT=12"
+  expect(sameTableDDL(before,before.replace(/AUTO_INCREMENT=12$/,'AUTO_INCREMENT=99'))).toBe(true)
+  expect(sameTableDDL(before,before.replace(/ AUTO_INCREMENT=12$/,''))).toBe(true)
+  expect(sameTableDDL(before,before.replace('int AUTO_INCREMENT','bigint AUTO_INCREMENT'))).toBe(false)
+  expect(sameTableDDL(before,before.replace('int AUTO_INCREMENT','int'))).toBe(false)
+  expect(sameTableDDL(before,before.replace("'AUTO_INCREMENT=12'","'AUTO_INCREMENT=99'"))).toBe(false)
+ })
  it('reads and removes timestamp auto-update without losing precision or other attributes',()=>{
   const original=parseDesign("CREATE TABLE `items` (`changed` timestamp(3) NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'time')"),draft=clone(original),field=draft.fields[0]!
   expect(field.onUpdate.toUpperCase()).toBe('CURRENT_TIMESTAMP(3)');expect(field.advanced).toBe('');expect(designSQL('qa','items',draft,original)).toBe('')

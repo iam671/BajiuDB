@@ -37,6 +37,10 @@ function tokens(text:string,mode=''){
  return result
 }
 function identifier(value:string){return value.startsWith('`')?value.slice(1,-1).replace(/``/g,'`'):value}
+export function sameTableDDL(before:string,after:string){
+ function shape(ddl:string){const ts=tokens(ddl),out:string[]=[];for(let i=0;i<ts.length;i++){const token=ts[i]!;if(!token.quoted&&token.depth===0&&token.value.toUpperCase()==='AUTO_INCREMENT'&&ts[i+1]?.value==='='&&/^\d+$/.test(ts[i+2]?.value??'')){i+=2;continue}out.push(token.value)}return JSON.stringify(out)}
+ try{return shape(before)===shape(after)}catch{return false}
+}
 function unquote(value:string,mode=''){if(!value.startsWith("'")&&!value.startsWith('"'))return value;const quote=value[0]!;const text=value.slice(1,-1).split(quote+quote).join(quote);if(mode.toUpperCase().split(',').includes('NO_BACKSLASH_ESCAPES'))return text;return text.replace(/\\([0bnrtZ\\'"])/g,(_,c:string)=>({'0':'\0',b:'\b',n:'\n',r:'\r',t:'\t',Z:'\x1a'}[c]??c))}
 export function fieldDefaultInput(field:Field,mode:string){
  if(field.defaultMode==='none')return ''

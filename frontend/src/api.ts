@@ -15,6 +15,7 @@ export interface ConnectionGroup {id:string;name:string}
 export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;sqlMode?:string;includeData?:boolean;transactionId?:string}
 export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
 export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string;transactionId?:string;transactionActive?:boolean}
+export interface DialogDetails {title:string;body:string;details:string;sql?:string}
 export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database';title:string;width:number;height:number;payload:any;revision?:number}
 export interface DialogAction {id:string;action:string;payload:any}
 type Bridge = {

@@ -1,29 +1,48 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import {createApp,nextTick,type App} from 'vue'
 import TableDesigner from './TableDesigner.vue'
-import {defaults} from './api'
+import {defaults,type DialogDetails} from './api'
 import {parseDesign} from './tableDesigner'
-let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string
+let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string,details:DialogDetails[],failure:string
 const schema='utf8mb4_unicode_ci'
 const result=(columns:string[],rows:(string|null)[][])=>({columns,rows,truncated:false,affected:'0'})
 async function settle(){for(let i=0;i<16;i++){await Promise.resolve();await nextTick()}}
 function button(text:string){const element=Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.trim()===text);if(!element)throw new Error('Button missing: '+text);return element}
 async function click(text:string){button(text).click();await settle()}
 async function input(label:string,value:string){const element=root.querySelector<HTMLInputElement|HTMLTextAreaElement>('[aria-label="'+label+'"]');if(!element)throw new Error('Input missing: '+label);element.value=value;element.dispatchEvent(new Event('input',{bubbles:true}));await settle()}
-async function mount(table?:string){app=createApp(TableDesigner,{profile:{...defaults(),id:'fake'},database:'qa',table,connected:true,active:true,sessionKey:'qa-session',onConfirm:(request:typeof confirmations[number])=>confirmations.push(request),onSaved:(name:string)=>saved.push(name)});app.mount(root);await settle()}
+async function mount(table?:string){app=createApp(TableDesigner,{profile:{...defaults(),id:'fake'},database:'qa',table,connected:true,active:true,sessionKey:'qa-session',onDetails:(value:DialogDetails)=>details.push(value),onConfirm:(request:typeof confirmations[number])=>confirmations.push(request),onSaved:(name:string)=>saved.push(name)});app.mount(root);await settle()}
 beforeEach(()=>{
- localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
+ localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';details=[];failure='';root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
  window.go={main:{App:{DatabaseAdmin:vi.fn(async(_task,_id,_db,req)=>{
   if(req.operation==='catalog')return {results:[result(['Collation','Charset','Id','Default'],[[schema,'utf8mb4','1',''],['utf8mb4_general_ci','utf8mb4','2','Yes'],['latin1_swedish_ci','latin1','3','Yes']])],completed:1,error:'',text:''}
   if(req.operation==='schema')return {results:[result(['DEFAULT_CHARACTER_SET_NAME','DEFAULT_COLLATION_NAME'],[['utf8mb4',schema]])],completed:1,error:'',text:''}
   commands.push(req.sql??'')
+  if(failure&&req.sqlMode!==undefined)return {results:[],completed:1,error:failure,text:''}
+  if(req.sql?.startsWith('SELECT TRIGGER_NAME'))return {results:[result(['TRIGGER_NAME','ACTION_TIMING','EVENT_MANIPULATION','ACTION_STATEMENT'],[])],completed:1,error:'',text:''}
   if(req.sql?.startsWith('SHOW CREATE TABLE')){const design=parseDesign(ddl);return {results:[result(['Table','Create Table'],[['items',ddl]]),result(['sql_mode'],[['STRICT_TRANS_TABLES']]),result(['TRIGGER_NAME','ACTION_TIMING','EVENT_MANIPULATION','ACTION_STATEMENT'],[]),result(['Field','Collation'],design.fields.map(f=>[f.name,/^(?:char|varchar|text)$/i.test(f.type)?f.collation||design.options.collation||schema:null])),result(['TABLE_COLLATION'],[[design.options.collation||schema]])],completed:5,error:'',text:''}}
   if(req.sql?.includes('CREATE TABLE')){ddl=req.sql.slice(req.sql.indexOf('CREATE TABLE'));return {results:[],completed:2,error:'',text:''}}
   return {results:[result(['sql_mode'],[['STRICT_TRANS_TABLES']])],completed:1,error:'',text:''}
- }),CancelDatabaseTask:vi.fn(async()=>{})} as never}}
+ }),TableDDL:vi.fn(async()=>ddl),CancelDatabaseTask:vi.fn(async()=>{})} as never}}
 })
 afterEach(()=>{app?.unmount();app=undefined;root.remove();delete window.go;vi.unstubAllGlobals()})
 describe('designer controls',()=>{
+ it('automatically loads changed server structure, retains the prior draft SQL and does not execute it',async()=>{
+  ddl="CREATE TABLE `items` (`title` varchar(80)) ENGINE=InnoDB";await mount('items');await input('title长度','120')
+  ddl="CREATE TABLE `items` (`title` varchar(100), `remote` int) ENGINE=InnoDB";await click('保存')
+  expect(root.textContent).toContain('已自动加载最新结构');expect(root.querySelector<HTMLInputElement>('[aria-label="title长度"]')?.value).toBe('100');expect(root.querySelectorAll('[aria-label="字段设计"] tbody tr')).toHaveLength(2)
+  expect(commands.some(sql=>sql.includes('ALTER TABLE'))).toBe(false);expect(details).toHaveLength(0);expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段')
+  await click('查看刷新前的草稿 SQL');expect(details[0]?.sql).toContain('VARCHAR(120)');expect(details[0]?.sql).toContain('ALTER TABLE')
+ })
+ it('saves through a changed table counter and keeps the current designer tab',async()=>{
+  ddl="CREATE TABLE `items` (`title` varchar(80)) ENGINE=InnoDB AUTO_INCREMENT=12";await mount('items');await input('title长度','120');ddl=ddl.replace('AUTO_INCREMENT=12','AUTO_INCREMENT=13');await click('保存')
+  expect(commands.some(sql=>sql.includes('ALTER TABLE'))).toBe(true);expect(root.textContent).toContain('表结构已保存');expect(details).toHaveLength(0);expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段')
+ })
+ it('opens error details without switching tabs for local and server syntax failures',async()=>{
+  await mount();await input('字段 1 名称','title');await click('选项');await input('表名','items');await click('字段');await input('title长度','bad');await click('保存')
+  expect(details[0]?.details).toContain('字段长度');expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段');expect(commands.some(sql=>sql.includes('CREATE TABLE'))).toBe(false)
+  await input('title长度','80');failure="第 2 条语句失败：Error 1064 (42000): syntax error near 'test' at line 2";await click('保存')
+  expect(details[1]?.details).toContain(failure);expect(details[1]?.sql).toContain('CREATE TABLE');expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段');expect(root.querySelector<HTMLInputElement>('[aria-label="title长度"]')?.value).toBe('80');expect(button('保存').disabled).toBe(false)
+ })
  it('shows type-specific properties, retains comments and clears incompatible attributes on type changes',async()=>{
   await mount();await input('字段 1 名称','value');await click('选项');await input('表名','typed');await click('字段')
   const checkbox=(text:string)=>Array.from(root.querySelectorAll<HTMLLabelElement>('.native-check')).find(label=>label.textContent?.trim()===text)?.querySelector<HTMLInputElement>('input')

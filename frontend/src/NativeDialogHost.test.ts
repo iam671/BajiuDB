@@ -16,3 +16,9 @@ it('preserves local typing when an older parent update arrives and sends only ch
 it('forwards the native close request with the latest form instead of silently discarding it',async()=>{
  app=createApp(NativeDialogHost);app.mount(root);await settle();const input=root.querySelector<HTMLInputElement>('#connection-name')!;input.value='unsaved QA';input.dispatchEvent(new Event('input',{bubbles:true}));window.dispatchEvent(new CustomEvent('bajiu:dialog-close',{detail:'qa-native'}));await settle();expect(send).toHaveBeenLastCalledWith(expect.objectContaining({action:'cancel',payload:expect.objectContaining({model:expect.objectContaining({name:'unsaved QA'})})}))
 })
+it('shows detailed errors and read-only SQL in the native dialog with a single close action',async()=>{
+ const state:WindowDialog={id:'qa-native',kind:'confirm',title:'保存表结构失败',width:760,height:520,revision:1,payload:{title:'保存表结构失败',body:'保存未完成',label:'关闭',notice:true,details:'Error 1064 (42000): syntax error at line 2',sql:'ALTER TABLE `items` INVALID;'}}
+ window.go!.main.App.GetWindowDialog=vi.fn(async()=>state);app=createApp(NativeDialogHost);app.mount(root);await settle()
+ expect(root.querySelector('pre')?.textContent).toContain('1064 (42000)');expect(root.querySelector('textarea')?.readOnly).toBe(true);expect(root.querySelector('textarea')?.value).toBe(state.payload.sql);expect(root.querySelectorAll('button')).toHaveLength(1)
+ ;(root.querySelector('button') as HTMLButtonElement).click();await settle();expect(send).toHaveBeenLastCalledWith({id:'qa-native',action:'cancel',payload:{}})
+})
