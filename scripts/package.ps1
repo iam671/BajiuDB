@@ -60,8 +60,20 @@ try {
         Write-Warning 'The current app session remains open. Close it before opening the updated release.'
     }
     foreach ($output in @($name, "$name.zip", "$name.sha256")) {
-        Remove-Output (Join-Path $distDir $output) $distDir
-        Move-Item -LiteralPath (Join-Path $stage $output) -Destination $distDir
+        $destination = Join-Path $distDir $output
+        if ($output -eq $name -and (Test-Path -LiteralPath $destination -PathType Container)) {
+            # A running app may also hold this folder as its working directory.
+            # Replace its contents without deleting the directory itself.
+            foreach ($item in @(Get-ChildItem -LiteralPath $destination -Force)) {
+                Remove-Output $item.FullName $distDir
+            }
+            foreach ($item in @(Get-ChildItem -LiteralPath (Join-Path $stage $output) -Force)) {
+                Move-Item -LiteralPath $item.FullName -Destination $destination
+            }
+        } else {
+            Remove-Output $destination $distDir
+            Move-Item -LiteralPath (Join-Path $stage $output) -Destination $distDir
+        }
     }
     $canonical = Join-Path $projectDir 'build/bin/BajiuDB.exe'
     $running = @(Get-Process -Name 'BajiuDB' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $canonical })
