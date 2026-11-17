@@ -397,7 +397,7 @@ async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.c
 async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
 function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table'){
  if(busy.value||dialogOpen.value||groupDialogOpen.value)return
- navigationError.value='';contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:230)));menu.value=''
+ navigationError.value='';contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?260:230)));menu.value=''
  nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
 }
 function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'connection')}
@@ -417,7 +417,7 @@ async function databaseChanged(operation:string,name:string){
 function contextItems():MenuItem[]{
  if(contextMenu.kind==='table'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database,table=contextMenu.table;if(!p)return []
-  return ([['createTable','新建表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map(([mode,label])=>({label,action:()=>showDatabaseTool(p,db,mode,table)})).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
+  return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
  }
 
  if(contextMenu.kind==='database'){
