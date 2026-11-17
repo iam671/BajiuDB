@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
-import {Plus,Save,Trash2,RefreshCw,Search,ChevronLeft,ChevronRight,ChevronsLeft,LayoutGrid,List,Undo2,LoaderCircle,Square,Columns3,SlidersHorizontal,PanelRight,GitBranch,Check,RotateCcw} from '@lucide/vue'
+import {Plus,Save,Trash2,RefreshCw,Search,ChevronLeft,ChevronRight,ChevronsLeft,LayoutGrid,List,Undo2,LoaderCircle,Square,Columns3,SlidersHorizontal,PanelRight,GitBranch,Check,RotateCcw,X} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile,type QueryResult} from './api'
 import {deleteRowSQL,makeDraft,metadataSQL,pageSQL,readColumns,readIndexes,saveRowSQL,uniqueKey,type CellDraft,type TableColumn,type TableFilter,type TableIndex,type TableSection} from './tableEditing'
 import {clampColumnWidth,defaultColumnWidth,readColumnLayout} from './tablePresentation'
 import {cellClipboardText,copyTableRecord,type TableCopyFormat} from './tableClipboard'
+import {useMenuDismissal} from './menuDismissal'
 const instanceID=crypto.randomUUID()
 const props=defineProps<{profile:Profile;database:string;table:string;section:TableSection;active:boolean;connected:boolean;sessionKey:string}>()
 type Confirmation={title:string;body:string;label:string;action:()=>void|Promise<void>}
@@ -50,7 +51,7 @@ function toggleCellEditor(){finishCellEdit();if(!showCellEditor.value&&selectedC
 function sideInput(event:Event){const index=selectedColumn.value,field=selectedField.value;if(index===null||!field||!editable(field))return;draft.value[index]={mode:'value',value:(event.target as HTMLTextAreaElement).value}}
 function sideColumn(event:Event){finishCellEdit();selectedColumn.value=Number((event.target as HTMLSelectElement).value)}
 function closeContext(){copyAsOpen.value=false;cellMenu.value=null}
-function outsideContext(event:PointerEvent){if(cellMenu.value&&!(event.target instanceof Node&&cellMenuRef.value?.contains(event.target)))closeContext()}
+useMenuDismissal(()=>cellMenu.value?cellMenuRef.value:undefined,closeContext)
 function contextCell(event:MouseEvent,row:CellRow,column:number){
  event.preventDefault();event.stopPropagation();if(running.value)return
  const open=()=>{if(!currentRow(row)){if(row==='new')return;pick(row)}finishCellEdit();copyAsOpen.value=false;selectedColumn.value=column;cellMenu.value={row,column,x:Math.max(4,Math.min(event.clientX,window.innerWidth-210)),y:Math.max(4,Math.min(event.clientY,window.innerHeight-205))};void nextTick(()=>cellMenuRef.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus())}
@@ -151,8 +152,8 @@ watch(running,value=>{if(value)finishCellEdit()},{flush:'sync'})
 watch(()=>props.section,value=>{section.value=value})
 watch(()=>props.sessionKey,(value,old)=>{if(old&&value!==old){sessionChanged.value=true;transactionID.value='';transactionPending.value=false}})
 watch(()=>props.connected,connected=>{if(connected&&!initialized)void perform(initialize)})
-onMounted(()=>{document.addEventListener('pointerdown',outsideContext);window.addEventListener('scroll',closeContext,true);window.addEventListener('resize',closeContext);void perform(initialize)})
-onUnmounted(()=>{disposed=true;releaseColumnResize?.();document.removeEventListener('pointerdown',outsideContext);window.removeEventListener('scroll',closeContext,true);window.removeEventListener('resize',closeContext);if(task)void api.CancelDatabaseTask(task).catch(()=>{});if(transactionID.value)void api.DatabaseAdmin(crypto.randomUUID(),props.profile.id,props.database,{operation:'transaction-rollback',transactionId:transactionID.value}).catch(()=>{})})
+onMounted(()=>{window.addEventListener('scroll',closeContext,true);window.addEventListener('resize',closeContext);void perform(initialize)})
+onUnmounted(()=>{disposed=true;releaseColumnResize?.();window.removeEventListener('scroll',closeContext,true);window.removeEventListener('resize',closeContext);if(task)void api.CancelDatabaseTask(task).catch(()=>{});if(transactionID.value)void api.DatabaseAdmin(crypto.randomUUID(),props.profile.id,props.database,{operation:'transaction-rollback',transactionId:transactionID.value}).catch(()=>{})})
 </script>
 <template><div class="table-data-editor">
  <nav class="table-section-tabs" aria-label="表内容"><button v-for="item in sections" :key="item[0]" :class="{active:section===item[0]}" @click="selectSection(item[0])">{{item[1]}}</button><span>{{profile.name}} / {{database}} / {{table}}</span></nav>
@@ -168,7 +169,7 @@ onUnmounted(()=>{disposed=true;releaseColumnResize?.();document.removeEventListe
  <p v-if="!connected" class="table-data-notice">连接已关闭。重新打开“{{profile.name}}”后可继续操作，当前内容保留。</p>
  <p v-if="sessionChanged&&connected" class="table-data-notice">连接会话已变化，请先点击“刷新”核对数据后再编辑。</p>
  <div v-if="section==='data'&&showFilters" class="table-data-filter" @keydown.enter.prevent="search"><select v-model="filter.column" aria-label="筛选字段" :disabled="running" @change="filter.operator='contains'"><option value="">全部字段</option><option v-for="c in columns" :key="c.name" :value="c.name">{{c.name}}</option></select><select v-model="filter.operator" aria-label="查询条件" :disabled="running||!filter.column"><option value="contains">包含</option><option value="equal">等于</option><option value="notEqual">不等于</option><option value="greater">大于</option><option value="less">小于</option><option value="null">为 NULL</option><option value="notNull">非 NULL</option></select><input v-model="filter.value" aria-label="查询内容" placeholder="输入查询条件" :disabled="running||['null','notNull'].includes(filter.operator)"/><select v-model="filterSort" aria-label="排序字段" :disabled="running"><option value="">默认排序</option><option v-for="column in columns" :key="column.name" :value="column.name">{{column.name}}</option></select><select v-model="filterDescending" aria-label="排序方向" :disabled="running"><option :value="false">升序</option><option :value="true">降序</option></select><button class="native-button" @click="search" :disabled="running||!connected||!columns.length"><Search :size="13"/>查询</button><button class="native-button" @click="resetSearch" :disabled="running||!connected">清空</button></div>
- <div class="table-data-feedback"><span v-if="running" role="status"><LoaderCircle :size="13" class="spin"/>正在处理…</span><p v-if="error" class="db-tools-error" role="alert">{{error}}</p><p v-if="message" class="db-tools-message" role="status">{{message}}</p><p v-if="section==='data'&&columns.length&&!keys.length" class="table-data-notice">此表没有可用的非空唯一键，已有记录仅供查看，可新增记录。</p><p v-if="dirty" class="table-data-dirty">{{isNew?'新增记录尚未保存':'当前记录有未保存的修改'}}</p></div>
+ <div class="table-data-feedback"><span v-if="running" role="status"><LoaderCircle :size="13" class="spin"/>正在处理…</span><p v-if="error" class="db-tools-error table-dismissible-feedback" role="alert"><span>{{error}}</span><button class="tiny-button" aria-label="关闭错误提示" title="关闭提示" @click="error=''"><X :size="14"/></button></p><p v-if="message" class="db-tools-message table-dismissible-feedback" role="status"><span>{{message}}</span><button class="tiny-button" aria-label="关闭操作提示" title="关闭提示" @click="message=''"><X :size="14"/></button></p><p v-if="section==='data'&&columns.length&&!keys.length" class="table-data-notice">此表没有可用的非空唯一键，已有记录仅供查看，可新增记录。</p><p v-if="dirty" class="table-data-dirty">{{isNew?'新增记录尚未保存':'当前记录有未保存的修改'}}</p></div>
  <div class="table-data-body"><div class="table-data-content">
   <template v-if="section==='data'">
    <template v-if="view==='form'">
