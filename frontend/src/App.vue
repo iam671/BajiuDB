@@ -86,7 +86,7 @@ function createQueryTab(profile:Profile,database:string,table?:string){
 function removeWorkspaceTab(id:string){const index=workspaceTabs.value.findIndex(tab=>tab.id===id);if(index<0)return;const active=activeWorkspaceTab.value===id;workspaceTabs.value.splice(index,1);if(active)activateWorkspaceTab(workspaceTabs.value[index]?.id??workspaceTabs.value[index-1]?.id??'objects',true)}
 const queryDocuments=computed(()=>workspaceTabs.value.filter((tab):tab is Extract<WorkspaceDocument,{kind:'query'}>=>tab.kind==='query'))
 const tableDocuments=computed(()=>workspaceTabs.value.filter((tab):tab is Extract<WorkspaceDocument,{kind:'table'}>=>tab.kind==='table'))
-function closeWorkspaceTab(id:string){const tab=workspaceTabs.value.find(tab=>tab.id===id);if(tab?.kind==='table'&&tab.dirty){ask('关闭表并放弃修改？','当前记录尚未保存，关闭后这些修改会被丢弃。','放弃修改',()=>removeWorkspaceTab(id),true);return}removeWorkspaceTab(id)}
+function closeWorkspaceTab(id:string){const tab=workspaceTabs.value.find(tab=>tab.id===id);if(tab?.kind==='table'&&tab.dirty){ask('关闭表并放弃修改？','当前表有未保存记录或尚未结束的事务，关闭将放弃草稿并请求回滚未提交事务。','放弃修改',()=>removeWorkspaceTab(id),true);return}removeWorkspaceTab(id)}
 function openTableTab(profile:Profile,database:string,table:string,section:TableSection='data'){
  closeMenus();if(!sessions[profile.id]){showNavigationError('请先打开连接');return}
  let tab=workspaceTabs.value.find(tab=>tab.kind==='table'&&tab.profile.id===profile.id&&tab.database===database&&tab.table===table)

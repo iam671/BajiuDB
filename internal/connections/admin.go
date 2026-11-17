@@ -14,13 +14,14 @@ import (
 )
 
 type AdminRequest struct {
-	Operation   string   `json:"operation"`
-	Name        string   `json:"name"`
-	Charset     string   `json:"charset"`
-	Collation   string   `json:"collation"`
-	SQL         string   `json:"sql"`
-	Statements  []string `json:"statements,omitempty"`
-	IncludeData bool     `json:"includeData"`
+	Operation     string   `json:"operation"`
+	Name          string   `json:"name"`
+	Charset       string   `json:"charset"`
+	Collation     string   `json:"collation"`
+	SQL           string   `json:"sql"`
+	Statements    []string `json:"statements,omitempty"`
+	IncludeData   bool     `json:"includeData"`
+	TransactionID string   `json:"transactionId,omitempty"`
 }
 type QueryResult struct {
 	Columns   []string    `json:"columns"`
@@ -29,10 +30,12 @@ type QueryResult struct {
 	Truncated bool        `json:"truncated"`
 }
 type AdminResult struct {
-	Results   []QueryResult `json:"results"`
-	Completed int           `json:"completed"`
-	Error     string        `json:"error"`
-	Text      string        `json:"text"`
+	Results           []QueryResult `json:"results"`
+	Completed         int           `json:"completed"`
+	Error             string        `json:"error"`
+	Text              string        `json:"text"`
+	TransactionID     string        `json:"transactionId,omitempty"`
+	TransactionActive bool          `json:"transactionActive"`
 }
 type adminDatabase interface {
 	Admin(context.Context, string, AdminRequest) (AdminResult, error)
@@ -97,6 +100,12 @@ var optionName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 var numericValue = regexp.MustCompile(`^-?[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?$`)
 
 func (d *mysqlDatabase) Admin(ctx context.Context, database string, request AdminRequest) (AdminResult, error) {
+	if request.Operation == "transaction-begin" {
+		return d.beginTableTransaction(ctx, database, request.Name)
+	}
+	if request.TransactionID != "" || request.Operation == "transaction-commit" || request.Operation == "transaction-rollback" {
+		return d.tableTransactionAdmin(ctx, database, request)
+	}
 	conn, err := d.db.Conn(ctx)
 	if err != nil {
 		return AdminResult{}, explainMySQL(err)
@@ -204,7 +213,13 @@ func schemaQueries(database string) []string {
 		"SELECT TABLE_NAME,COLUMN_NAME,REFERENCED_TABLE_SCHEMA,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME,CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=" + schema + " AND REFERENCED_TABLE_NAME IS NOT NULL ORDER BY TABLE_NAME,CONSTRAINT_NAME,ORDINAL_POSITION",
 	}
 }
-func queryResult(ctx context.Context, conn *sql.Conn, statement string, limit int) (QueryResult, error) {
+
+type sqlReader interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func queryResult(ctx context.Context, conn sqlReader, statement string, limit int) (QueryResult, error) {
 	result := QueryResult{Columns: []string{}, Rows: [][]*string{}}
 	// QueryContext also executes non-row statements. Follow with ROW_COUNT on the
 	// same connection to report writes without parsing SQL or executing it twice.

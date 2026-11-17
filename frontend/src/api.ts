@@ -12,9 +12,9 @@ export interface TestResult {success:boolean; message:string; serverVersion:stri
 export interface DatabaseObject {name:string;kind:string;engine:string;rows:string;dataLength:string;indexLength:string;autoIncrement:string;comment:string;createdAt:string;modifiedAt:string}
 export interface ObjectList {objects:DatabaseObject[];truncated:boolean}
 export interface ConnectionGroup {id:string;name:string}
-export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;includeData?:boolean}
+export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;includeData?:boolean;transactionId?:string}
 export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
-export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string}
+export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string;transactionId?:string;transactionActive?:boolean}
 export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database';title:string;width:number;height:number;payload:any;revision?:number}
 export interface DialogAction {id:string;action:string;payload:any}
 type Bridge = {

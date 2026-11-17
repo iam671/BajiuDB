@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -25,8 +26,11 @@ type Dialer interface {
 }
 type MySQLDialer struct{}
 type mysqlDatabase struct {
-	db          *sql.DB
-	closeTunnel func() error
+	db                 *sql.DB
+	closeTunnel        func() error
+	transactionMu      sync.Mutex
+	transactions       map[string]*tableTransaction
+	transactionsClosed bool
 }
 
 func (MySQLDialer) Open(ctx context.Context, in Input, password string) (Database, error) {
@@ -106,7 +110,7 @@ func (MySQLDialer) Open(ctx context.Context, in Input, password string) (Databas
 		return nil, errors.New("无法创建 MySQL 连接，请检查配置")
 	}
 	db := sql.OpenDB(c)
-	db.SetMaxOpenConns(2)
+	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxIdleTime(3 * time.Minute)
 	db.SetConnMaxLifetime(30 * time.Minute)
@@ -144,6 +148,7 @@ func (d *mysqlDatabase) Info(ctx context.Context) (SessionInfo, error) {
 }
 
 func (d *mysqlDatabase) Close() error {
+	d.closeTableTransactions()
 	err := d.db.Close()
 	if d.closeTunnel != nil {
 		_ = d.closeTunnel()

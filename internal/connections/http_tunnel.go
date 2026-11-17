@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,6 +154,9 @@ func (d *httpDatabase) Close() error {
 	return nil
 }
 func (d *httpDatabase) Admin(ctx context.Context, database string, request AdminRequest) (AdminResult, error) {
+	if request.TransactionID != "" || strings.HasPrefix(request.Operation, "transaction-") {
+		return AdminResult{}, errors.New("PHP 中转每次请求使用独立会话，暂不支持跨请求事务；请使用直连或 SSH")
+	}
 	if request.Operation == "query" {
 		statements, err := SplitSQL(request.SQL)
 		if err != nil {
