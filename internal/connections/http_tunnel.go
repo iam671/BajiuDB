@@ -44,7 +44,7 @@ func newHTTPDatabase(in Input, password string) (Database, error) {
 		return errors.New("HTTP 中转不允许重定向，请填写最终脚本地址")
 	}}}, nil
 }
-func (d *httpDatabase) call(ctx context.Context, operation, database, kind, table string, out any) error {
+func (d *httpDatabase) call(ctx context.Context, operation, database, kind, table string, out any, admin ...AdminRequest) error {
 	request := struct {
 		Protocol   string `json:"protocol"`
 		Operation  string `json:"operation"`
@@ -58,10 +58,14 @@ func (d *httpDatabase) call(ctx context.Context, operation, database, kind, tabl
 			TLSMode  string `json:"tlsMode"`
 			CA       string `json:"ca"`
 		} `json:"connection"`
-		Database string `json:"database"`
-		Kind     string `json:"kind"`
-		Table    string `json:"table"`
+		Database string        `json:"database"`
+		Kind     string        `json:"kind"`
+		Table    string        `json:"table"`
+		Admin    *AdminRequest `json:"admin,omitempty"`
 	}{Protocol: tunnelProtocol, Operation: operation, Database: database, Kind: kind, Table: table}
+	if len(admin) > 0 {
+		request.Admin = &admin[0]
+	}
 	request.Connection.Host = d.in.Host
 	request.Connection.Port = d.in.Port
 	request.Connection.Username = d.in.Username
@@ -93,14 +97,21 @@ func (d *httpDatabase) call(ctx context.Context, operation, database, kind, tabl
 	}
 	defer response.Body.Close()
 	if response.StatusCode == 401 || response.StatusCode == 403 {
+		if response.StatusCode == 403 && operation == "admin" && len(admin) > 0 && (admin[0].Operation == "query" || admin[0].Operation == "create" || admin[0].Operation == "alter" || admin[0].Operation == "drop") {
+			return errors.New("PHP 中转拒绝 SQL 操作，请检查 BAJIU_TUNNEL_ALLOW_SQL=1、令牌及主机白名单")
+		}
 		return errors.New("PHP 中转拒绝访问，请检查访问令牌及数据库主机白名单")
 	}
 	if response.StatusCode != 200 {
 		return errors.New("PHP 中转返回错误，请检查脚本部署及 mysqli 扩展")
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
-	if err != nil || len(data) > 8<<20 {
-		return errors.New("中转响应无法读取或超过 8 MB")
+	limit := 8 << 20
+	if operation == "admin" {
+		limit = 64 << 20
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
+	if err != nil || len(data) > limit {
+		return errors.New("中转响应无法读取或超过允许大小")
 	}
 	var reply struct {
 		Protocol string          `json:"protocol"`
@@ -140,4 +151,17 @@ func (d *httpDatabase) TableDDL(ctx context.Context, database, table string) (st
 func (d *httpDatabase) Close() error {
 	d.once.Do(func() { d.cancel(); d.client.CloseIdleConnections() })
 	return nil
+}
+func (d *httpDatabase) Admin(ctx context.Context, database string, request AdminRequest) (AdminResult, error) {
+	if request.Operation == "query" {
+		statements, err := SplitSQL(request.SQL)
+		if err != nil {
+			return AdminResult{}, err
+		}
+		request.Statements = statements
+		request.SQL = ""
+	}
+	var result AdminResult
+	err := d.call(ctx, "admin", database, "", "", &result, request)
+	return result, err
 }

@@ -12,6 +12,9 @@ export interface TestResult {success:boolean; message:string; serverVersion:stri
 export interface DatabaseObject {name:string;kind:string;engine:string;rows:string;dataLength:string;indexLength:string;autoIncrement:string;comment:string;createdAt:string;modifiedAt:string}
 export interface ObjectList {objects:DatabaseObject[];truncated:boolean}
 export interface ConnectionGroup {id:string;name:string}
+export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;includeData?:boolean}
+export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
+export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string}
 type Bridge = {
   ListGroups():Promise<ConnectionGroup[]>; SaveGroup(id:string,name:string):Promise<ConnectionGroup>;
   DeleteGroup(id:string):Promise<void>;
@@ -24,6 +27,9 @@ type Bridge = {
   ConfigPath():Promise<string>; SelectCAFile():Promise<string>;
   SelectSSHKey():Promise<string>;TableDDL(id:string,database:string,table:string):Promise<string>;
   QuitApp():Promise<void>;
+  DatabaseAdmin(task:string,id:string,database:string,request:AdminRequest):Promise<AdminResult>;
+  CancelDatabaseTask(task:string):Promise<void>;OpenSQLFile():Promise<{path:string;text:string;statements:number}>;
+  SaveDatabaseReport(name:string,text:string):Promise<string>;
 }
 declare global { interface Window {go?:{main:{App:Bridge}}} }
 export const isDesktop = () => !!window.go?.main?.App

@@ -9,7 +9,7 @@ const PROTOCOL = 'bajiu-mysql-v1';
 function reply(bool $ok, mixed $data = null, int $code = 0, int $status = 200): never {
     http_response_code($status);
     $json = json_encode(['protocol'=>PROTOCOL,'ok'=>$ok,'code'=>$code,'data'=>$data], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-    if ($json === false || strlen($json) > 8388608) { http_response_code(500); $json='{"protocol":"bajiu-mysql-v1","ok":false,"code":0,"data":null}'; }
+    if ($json === false || strlen($json) > 67108864) { http_response_code(500); $json='{"protocol":"bajiu-mysql-v1","ok":false,"code":0,"data":null}'; }
     echo $json; exit;
 }
 function identifier(string $name): string { return '`'.str_replace('`','``',$name).'`'; }
@@ -28,12 +28,12 @@ if (strlen($token)<32) reply(false,null,0,503);
 $provided=(string)($_SERVER['HTTP_X_BAJIU_TOKEN']??'');
 if ($provided==='' && str_starts_with((string)($_SERVER['HTTP_AUTHORIZATION']??''),'Bearer ')) $provided=substr($_SERVER['HTTP_AUTHORIZATION'],7);
 if (!hash_equals($token,$provided)) reply(false,null,0,401);
-$raw=file_get_contents('php://input',false,null,0,2097153);
-if ($raw===false || strlen($raw)>2097152) reply(false,null,0,413);
+$raw=file_get_contents('php://input',false,null,0,16777217);
+if ($raw===false || strlen($raw)>16777216) reply(false,null,0,413);
 $db=null; $caFile=null;
 try {
     $request=json_decode($raw,true,32,JSON_THROW_ON_ERROR);
-    if (($request['protocol']??'')!==PROTOCOL || !in_array($request['operation']??'', ['info','objects','ddl'],true)) throw new InvalidArgumentException('protocol');
+    if (($request['protocol']??'')!==PROTOCOL || !in_array($request['operation']??'', ['info','objects','ddl','admin'],true)) throw new InvalidArgumentException('protocol');
     $connection=$request['connection']??[];
     $host=nameValue($connection['host']??null); $port=(int)($connection['port']??0);
     $allowed=array_map('trim',explode(',',(string)(getenv('BAJIU_TUNNEL_ALLOWED_HOSTS')?:'127.0.0.1,localhost,::1')));
@@ -52,7 +52,12 @@ try {
     $db->real_connect($host,$connection['username'],$connection['password'],$default!==''?$default:null,$port,null,$flags);$db->set_charset('utf8mb4');
     if ($verify) { $cipher=$db->query("SHOW SESSION STATUS LIKE 'Ssl_cipher'")->fetch_row(); if (!$cipher || $cipher[1]==='') throw new RuntimeException('TLS required'); }
     $operation=$request['operation'];
-    if ($operation==='info') {
+    if ($operation==='admin') {
+        require_once __DIR__.'/admin.php';
+        $admin=$request['admin']??[];
+        if(in_array($admin['operation']??'',['query','create','alter','drop'],true)&&getenv('BAJIU_TUNNEL_ALLOW_SQL')!=='1')reply(false,null,0,403);
+        $data=databaseAdmin($db,(string)($request['database']??''),$admin);
+    } elseif ($operation==='info') {
         $row=$db->query('SELECT VERSION(), CURRENT_USER()')->fetch_row();$databases=[];
         $result=$db->query('SHOW DATABASES');while($entry=$result->fetch_row()){$databases[]=$entry[0];if(count($databases)>=10000)break;}
         $data=['connected'=>true,'serverVersion'=>$row[0],'currentUser'=>$row[1],'databases'=>$databases];
