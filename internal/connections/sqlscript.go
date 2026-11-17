@@ -8,6 +8,24 @@ import (
 
 // SplitSQL honours quoted strings, identifiers, comments and mysql DELIMITER lines.
 func SplitSQL(source string) ([]string, error) {
+	return splitSQL(source, false, false)
+}
+
+// SplitSQLForMode keeps string boundaries consistent with the execution session.
+func SplitSQLForMode(source, mode string) ([]string, error) {
+	noBackslashEscapes, ansiQuotes := false, false
+	for _, flag := range strings.Split(mode, ",") {
+		if strings.EqualFold(strings.TrimSpace(flag), "ANSI_QUOTES") {
+			ansiQuotes = true
+		}
+		if strings.EqualFold(strings.TrimSpace(flag), "NO_BACKSLASH_ESCAPES") {
+			noBackslashEscapes = true
+		}
+	}
+	return splitSQL(source, noBackslashEscapes, ansiQuotes)
+}
+
+func splitSQL(source string, noBackslashEscapes, ansiQuotes bool) ([]string, error) {
 	if len(source) > 8<<20 {
 		return nil, errors.New("SQL 文件超过 8 MB")
 	}
@@ -45,7 +63,7 @@ func SplitSQL(source string) ([]string, error) {
 			continue
 		}
 		if quote != 0 {
-			if c == '\\' && quote != '`' {
+			if c == '\\' && quote != '`' && !(ansiQuotes && quote == '"') && !noBackslashEscapes {
 				i++
 				continue
 			}

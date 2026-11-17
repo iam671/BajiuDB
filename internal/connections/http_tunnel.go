@@ -158,7 +158,14 @@ func (d *httpDatabase) Admin(ctx context.Context, database string, request Admin
 		return AdminResult{}, errors.New("PHP 中转每次请求使用独立会话，暂不支持跨请求事务；请使用直连或 SSH")
 	}
 	if request.Operation == "query" {
-		statements, err := SplitSQL(request.SQL)
+		mode := ""
+		if request.SQLMode != nil {
+			mode = *request.SQLMode
+			if len(mode) > 512 || strings.Trim(mode, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_,") != "" {
+				return AdminResult{}, errors.New("SQL 模式格式无效")
+			}
+		}
+		statements, err := SplitSQLForMode(request.SQL, mode)
 		if err != nil {
 			return AdminResult{}, err
 		}

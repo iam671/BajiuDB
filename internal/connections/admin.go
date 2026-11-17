@@ -19,6 +19,7 @@ type AdminRequest struct {
 	Charset       string   `json:"charset"`
 	Collation     string   `json:"collation"`
 	SQL           string   `json:"sql"`
+	SQLMode       *string  `json:"sqlMode,omitempty"`
 	Statements    []string `json:"statements,omitempty"`
 	IncludeData   bool     `json:"includeData"`
 	TransactionID string   `json:"transactionId,omitempty"`
@@ -152,7 +153,17 @@ func (d *mysqlDatabase) Admin(ctx context.Context, database string, request Admi
 		result.Completed = 1
 		return result, nil
 	case "query":
-		statements, e := SplitSQL(request.SQL)
+		mode := ""
+		if request.SQLMode != nil {
+			mode = *request.SQLMode
+			if len(mode) > 512 || strings.Trim(mode, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_,") != "" {
+				return result, errors.New("SQL 模式格式无效")
+			}
+			if _, e := conn.ExecContext(ctx, "SET SESSION sql_mode = ?", mode); e != nil {
+				return result, explainMySQL(e)
+			}
+		}
+		statements, e := SplitSQLForMode(request.SQL, mode)
 		if e != nil {
 			return result, e
 		}

@@ -7,6 +7,7 @@ import InlineGroupEditor from './InlineGroupEditor.vue'
 import DatabaseTools, {type DatabaseToolMode} from './DatabaseTools.vue'
 import QueryEditor from './QueryEditor.vue'
 import TableDataEditor from './TableDataEditor.vue'
+import TableDesigner from './TableDesigner.vue'
 import type {TableSection} from './tableEditing'
 import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
@@ -75,7 +76,7 @@ const nativeWindows=hasNativeWindows()
 const menu = ref('')
 const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:''})
 const databaseTool=ref<{profile:Profile;database:string;mode:DatabaseToolMode;table?:string;initialSQL?:string}|null>(null)
-type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string}|{kind:'table';table:string;section:TableSection;dirty:boolean})
+type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
 const activeDocument=computed(()=>workspaceTabs.value.find(tab=>tab.id===activeWorkspaceTab.value))
 let querySequence=0
@@ -86,8 +87,11 @@ function createQueryTab(profile:Profile,database:string,table?:string){
 }
 function removeWorkspaceTab(id:string){const index=workspaceTabs.value.findIndex(tab=>tab.id===id);if(index<0)return;const active=activeWorkspaceTab.value===id;workspaceTabs.value.splice(index,1);if(active)activateWorkspaceTab(workspaceTabs.value[index]?.id??workspaceTabs.value[index-1]?.id??'objects',true)}
 const queryDocuments=computed(()=>workspaceTabs.value.filter((tab):tab is Extract<WorkspaceDocument,{kind:'query'}>=>tab.kind==='query'))
+const designDocuments=computed(()=>workspaceTabs.value.filter((tab):tab is Extract<WorkspaceDocument,{kind:'design'}>=>tab.kind==='design'))
+function openDesignTab(profile:Profile,database:string,table?:string){closeMenus();if(!sessions[profile.id]){showNavigationError('请先打开连接');return}let tab=table?workspaceTabs.value.find(t=>t.kind==='design'&&t.profile.id===profile.id&&t.database===database&&t.table===table):undefined;if(!tab){tab={kind:'design',id:crypto.randomUUID(),title:table?table+' - 设计':'无标题 - 表',profile:{...profile},database,table,dirty:false};workspaceTabs.value.push(tab)}activateWorkspaceTab(tab.id)}
+async function designSaved(tab:Extract<WorkspaceDocument,{kind:'design'}>,name:string){tab.table=name;tab.title=name+' - 设计';try{const session=sessions[tab.profile.id]?.connectedAt,request=objectRequest,result=await api.ListObjects(tab.profile.id,tab.database,'tables');if(sessions[tab.profile.id]?.connectedAt!==session)return;treeObjects[treeKey(tab.profile.id,tab.database,'tables')]=result.objects;if(request===objectRequest&&selectedID.value===tab.profile.id&&selectedDatabase.value===tab.database&&category.value==='tables'){objects.value=result.objects;truncated.value=result.truncated;clearDDL()}}catch(e){showNavigationError('结构已保存，但表列表刷新失败：'+errorText(e))}}
 const tableDocuments=computed(()=>workspaceTabs.value.filter((tab):tab is Extract<WorkspaceDocument,{kind:'table'}>=>tab.kind==='table'))
-function closeWorkspaceTab(id:string){const tab=workspaceTabs.value.find(tab=>tab.id===id);if(tab?.kind==='table'&&tab.dirty){ask('关闭表并放弃修改？','当前表有未保存记录或尚未结束的事务，关闭将放弃草稿并请求回滚未提交事务。','放弃修改',()=>removeWorkspaceTab(id),true);return}removeWorkspaceTab(id)}
+function closeWorkspaceTab(id:string){const tab=workspaceTabs.value.find(tab=>tab.id===id);if(tab?.kind==='design'&&tab.dirty){ask('关闭设计并放弃修改？','当前表设计有未保存的修改，关闭将丢弃设计草稿并取消请求，已完成的结构变更不会回滚。','放弃修改',()=>removeWorkspaceTab(id),true);return}if(tab?.kind==='table'&&tab.dirty){ask('关闭表并放弃修改？','当前表有未保存记录或尚未结束的事务，关闭将放弃草稿并请求回滚未提交事务。','放弃修改',()=>removeWorkspaceTab(id),true);return}removeWorkspaceTab(id)}
 function openTableTab(profile:Profile,database:string,table:string,section:TableSection='data'){
  closeMenus();if(!sessions[profile.id]){showNavigationError('请先打开连接');return}
  let tab=workspaceTabs.value.find(tab=>tab.kind==='table'&&tab.profile.id===profile.id&&tab.database===database&&tab.table===table)
@@ -407,7 +411,7 @@ function contextForDatabase(e:MouseEvent,p:Profile,database:string){selectDataba
 function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.object?.kind==='tables'&&selected.value){void contextForTable(e,selected.value,selectedDatabase.value,row.object);return}if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
 function closeDatabase(p:Profile,database:string){clearTree(p.id,database);openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database);if(selectedID.value===p.id&&selectedDatabase.value===database){selectProfile(p);selectedRowKey.value=database;databaseNodeSelected.value=true}}
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
-function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
+function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
 async function databaseChanged(operation:string,name:string){
  const target=databaseTool.value;if(!target)return
  if(operation==='table'){try{await refreshTableList(target.profile,target.database)}catch(e){showNavigationError(errorText(e))}return}
@@ -560,7 +564,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
            <div class="object-tab-strip" role="tablist" aria-label="工作区标签页">
             <button id="workspace-tab-objects" class="object-tab" :class="{active:activeWorkspaceTab==='objects'}" role="tab" :aria-selected="activeWorkspaceTab==='objects'" aria-controls="workspace-panel-objects" :tabindex="activeWorkspaceTab==='objects'?0:-1" @click="activateWorkspaceTab('objects')" @keydown="workspaceTabKeys($event,'objects')"><FolderOpen :size="14"/>对象</button>
             <div v-for="tab in workspaceTabs" :key="tab.id" class="query-workspace-tab" :class="{active:activeWorkspaceTab===tab.id}" role="presentation">
-             <button :id="'workspace-tab-'+tab.id" class="object-tab query-tab-button" :class="{active:activeWorkspaceTab===tab.id}" role="tab" :aria-selected="activeWorkspaceTab===tab.id" :aria-controls="'workspace-panel-'+tab.id" :tabindex="activeWorkspaceTab===tab.id?0:-1" :title="tab.title+' · '+tab.profile.name+' / '+tab.database" @click="activateWorkspaceTab(tab.id)" @keydown="workspaceTabKeys($event,tab.id)"><component :is="tab.kind==='table'?Table2:FileCode2" :size="14"/><span>{{tab.title}}{{tab.kind==='table'&&tab.dirty?' *':''}}</span></button>
+             <button :id="'workspace-tab-'+tab.id" class="object-tab query-tab-button" :class="{active:activeWorkspaceTab===tab.id}" role="tab" :aria-selected="activeWorkspaceTab===tab.id" :aria-controls="'workspace-panel-'+tab.id" :tabindex="activeWorkspaceTab===tab.id?0:-1" :title="tab.title+' · '+tab.profile.name+' / '+tab.database" @click="activateWorkspaceTab(tab.id)" @keydown="workspaceTabKeys($event,tab.id)"><component :is="tab.kind==='table'?Table2:tab.kind==='design'?Pencil:FileCode2" :size="14"/><span>{{tab.title}}{{tab.kind!=='query'&&tab.dirty?' *':''}}</span></button>
              <button class="query-tab-close" :tabindex="activeWorkspaceTab===tab.id?0:-1" :aria-label="'关闭'+tab.title" :title="'关闭'+tab.title" @click.stop="closeWorkspaceTab(tab.id)"><X :size="12"/></button>
             </div>
            </div>
@@ -589,6 +593,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
           <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
           </div>
           <QueryEditor v-for="tab in queryDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :initialSQL="tab.initialSQL" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]"/>
+          <TableDesigner v-for="tab in designDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @saved="name=>designSaved(tab,name)" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
           <TableDataEditor v-for="tab in tableDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :section="tab.section" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @section="tab.section=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
         </main>
         <div v-if="showInformation&&activeWorkspaceTab==='objects'" class="pane-splitter" role="separator" aria-label="调整信息窗格宽度" aria-orientation="vertical" tabindex="0" :aria-valuenow="rightWidth" aria-valuemin="180" aria-valuemax="360" @pointerdown="startResize($event,'right')" @keydown="resizeKeys($event,'right')"></div>

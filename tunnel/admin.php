@@ -41,6 +41,7 @@ function databaseAdmin(mysqli $db,string $schema,array $request):array{
         $db->query($sql);$reply['completed']=1;return $reply;
     }
     if($operation==='query'){
+        if(array_key_exists('sqlMode',$request)){$mode=$request['sqlMode'];if(!is_string($mode)||strlen($mode)>512||!preg_match('/^[A-Za-z0-9_,]*$/D',$mode))throw new InvalidArgumentException('sqlMode');$statement=$db->prepare('SET SESSION sql_mode = ?');$statement->bind_param('s',$mode);$statement->execute();$statement->close();}
         $statements=$request['statements']??[];if(!is_array($statements)||count($statements)===0||count($statements)>10000)throw new InvalidArgumentException('statements');$bytes=0;$resultBytes=0;
         foreach($statements as $sql){if(!is_string($sql)||($bytes+=strlen($sql))>8388608)throw new InvalidArgumentException('sql');try{$result=adminQuery($db,$sql);$reply['completed']++;foreach($result['rows'] as $row){foreach($row as $value){$resultBytes+=strlen((string)$value);}}if($resultBytes>16777216){$reply['error']='结果累计超过 16 MB，已停止继续执行；已提交操作不会自动回滚';break;}if(count($reply['results'])<100)$reply['results'][]=$result;}catch(mysqli_sql_exception $error){$reply['error']='第 '.($reply['completed']+1).' 条语句失败（MySQL '.$error->getCode().'）；已提交操作不会自动回滚';break;}}
         return $reply;
