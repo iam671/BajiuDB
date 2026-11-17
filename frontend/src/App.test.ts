@@ -16,6 +16,7 @@ async function mount(){app=createApp(App);app.mount(root);await settle()}
 function createDialog(){root.querySelector<HTMLButtonElement>('[aria-label="新建连接"]')!.click()}
 function dragData(){const values=new Map<string,string>();return {effectAllowed:'none',dropEffect:'none',get types(){return [...values.keys()]},setData(type:string,value:string){values.set(type,value)},getData(type:string){return values.get(type)??''}}}
 function drag(element:Element,type:string,data:ReturnType<typeof dragData>){const event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperty(event,'dataTransfer',{value:data});element.dispatchEvent(event);return event}
+async function doubleClick(element:HTMLElement){element.click();await settle();element.click();element.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle()}
 
 beforeEach(()=>{
  localStorage.clear();records=[];catalog=[]
@@ -30,7 +31,7 @@ beforeEach(()=>{
  bridge.SelectSSHKey=vi.fn(async()=>'qa-test-private-key')
  root=document.createElement('div');document.body.append(root)
 })
-afterEach(()=>{app?.unmount();root.remove();delete window.go;vi.restoreAllMocks()})
+afterEach(()=>{app?.unmount();root.remove();delete window.go;vi.restoreAllMocks();vi.unstubAllGlobals()})
 
 describe('desktop workspace and connection dialog',()=>{
  it('shows one connection action and toggles expansion on double click without reconnecting',async()=>{
@@ -40,12 +41,47 @@ describe('desktop workspace and connection dialog',()=>{
   connection=root.querySelector('.tree-connection')!;connection.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));await settle();menu=root.querySelector('[role="menu"]')!;expect(menu.textContent).toContain('关闭连接');expect(menu.textContent).not.toContain('打开连接');expect(menu.textContent).not.toContain('展开连接')
   connection.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();expect(root.querySelector('.tree-database')).toBeNull();connection.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();expect(root.querySelector('.tree-database')).not.toBeNull();expect(bridge.Connect).toHaveBeenCalledOnce()
  })
- it('shows only database information on a single click and reads DDL only after opening a table',async()=>{
+ it('exposes DDL on table selection and switches tabs only when explicitly requested',async()=>{
   records=[savedProfile];await mount();root.querySelector('.tree-connection')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle()
-  root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();expect(bridge.ListObjects).not.toHaveBeenCalled();expect(root.querySelector('.information-details')?.textContent).toContain('test_db');expect(root.querySelector('.information-tabs')?.textContent).not.toContain('DDL')
-  root.querySelector('.tree-database')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();root.querySelector<HTMLTableRowElement>('.object-table tbody tr')!.click();await settle();expect(bridge.TableDDL).not.toHaveBeenCalled();expect(root.querySelector('.information-tabs')?.textContent).not.toContain('DDL')
-  root.querySelector('.object-table tbody tr')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();expect(bridge.TableDDL).toHaveBeenCalledWith('test-profile','test_db','customers');expect(root.querySelector('.ddl-panel pre')?.textContent).toContain('CREATE TABLE')
+  root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();expect(bridge.ListObjects).toHaveBeenCalledWith('test-profile','test_db','tables');expect(root.querySelector('.object-table tbody')?.textContent).toContain('customers');expect(root.querySelector('.tree-database.selected')).not.toBeNull();expect(root.querySelector('.information-details')?.textContent).toContain('test_db');expect(root.querySelector('.information-tabs')?.textContent).not.toContain('DDL');expect(root.querySelector('.tree-database')?.getAttribute('aria-expanded')).toBe('false')
+  root.querySelector('.tree-database')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();root.querySelector<HTMLTableRowElement>('.object-table tbody tr')!.click();await settle();expect(bridge.TableDDL).not.toHaveBeenCalled();expect(root.querySelector('.information-tabs')?.textContent).toContain('DDL');expect(root.querySelector('.information-tabs .active')?.textContent).toBe('信息')
+  await doubleClick(root.querySelector('.object-table tbody tr')!);expect(bridge.TableDDL).not.toHaveBeenCalled();expect(root.querySelector('.ddl-panel')).toBeNull();button('DDL',root.querySelector('.information-tabs')!).click();await settle();expect(bridge.TableDDL).toHaveBeenCalledWith('test-profile','test_db','customers');expect(root.querySelector('.ddl-panel pre')?.textContent).toContain('CREATE TABLE')
+  button('信息',root.querySelector('.information-tabs')!).click();await settle();await doubleClick(root.querySelector('.object-table tbody tr')!);expect(root.querySelector('.information-tabs .active')?.textContent).toBe('信息');expect(bridge.TableDDL).toHaveBeenCalledTimes(1)
   root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();expect(root.querySelector('.information-tabs')?.textContent).not.toContain('DDL');expect(root.querySelector('.ddl-panel')).toBeNull()
+ })
+ it('shows a completion SVG only after a successful DDL copy and supports retrying clipboard failures',async()=>{
+  const writeText=vi.fn().mockRejectedValueOnce(new Error('denied')).mockResolvedValue(undefined);vi.stubGlobal('navigator',{clipboard:{writeText}})
+  records=[savedProfile];await mount();await doubleClick(root.querySelector('.tree-connection')!);root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();root.querySelector<HTMLTableRowElement>('.object-table tbody tr')!.click();await settle();button('DDL',root.querySelector('.information-tabs')!).click();await settle()
+  root.querySelector<HTMLButtonElement>('.ddl-copy-button')!.click();await settle();expect(root.querySelector('.ddl-copy-complete')).toBeNull();expect(root.querySelector('.ddl-panel [role="alert"]')?.textContent).toContain('复制失败')
+  root.querySelector<HTMLButtonElement>('.ddl-copy-button')!.click();await settle();expect(writeText).toHaveBeenLastCalledWith('CREATE TABLE `customers` (`id` bigint NOT NULL) ENGINE=InnoDB');expect(root.querySelector('.ddl-copy-button svg.ddl-copy-complete')).not.toBeNull();expect(root.querySelector('.ddl-copy-status')?.textContent).toBe('已复制表定义');expect(root.querySelector('.ddl-panel [role="alert"]')).toBeNull()
+  const completed=root.querySelector('.ddl-copy-complete');root.querySelector<HTMLButtonElement>('.ddl-copy-button')!.click();await settle();expect(root.querySelector('.ddl-copy-complete')).not.toBe(completed)
+  let copied:()=>void=()=>{};writeText.mockImplementationOnce(()=>new Promise<void>(resolve=>{copied=resolve}));root.querySelector<HTMLButtonElement>('.ddl-copy-button')!.click();await settle();root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();copied();await settle();expect(root.querySelector('.ddl-copy-complete')).toBeNull()
+ })
+ it('retains the manually selected DDL tab when selecting another table and loads that table definition',async()=>{
+  bridge.ListObjects.mockResolvedValue({objects:['first_table','second_table'].map(name=>({name,kind:'tables',engine:'InnoDB'})),truncated:false});bridge.TableDDL.mockImplementation(async(_id,_db,table)=>'CREATE TABLE `'+table+'` (`id` bigint)')
+  records=[savedProfile];await mount();await doubleClick(root.querySelector('.tree-connection')!);root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();let rows=root.querySelectorAll<HTMLTableRowElement>('.object-table tbody tr');rows[0].click();await settle();button('DDL',root.querySelector('.information-tabs')!).click();await settle();rows[1].click();await settle();expect(root.querySelector('.information-tabs .active')?.textContent).toBe('DDL');expect(root.querySelector('.ddl-panel pre')?.textContent).toContain('second_table');expect(bridge.TableDDL).toHaveBeenLastCalledWith('test-profile','test_db','second_table')
+ })
+ it('toggles database expansion on real double-click sequences without reloading or reopening a collapsed node',async()=>{
+  records=[savedProfile];await mount();await doubleClick(root.querySelector('.tree-connection')!)
+  const database=root.querySelector<HTMLButtonElement>('.tree-database')!
+  await doubleClick(database);expect(database.getAttribute('aria-expanded')).toBe('true');expect(root.querySelectorAll('.tree-category')).toHaveLength(4);expect(bridge.ListObjects).toHaveBeenCalledTimes(1)
+  await doubleClick(database);expect(database.getAttribute('aria-expanded')).toBe('false');expect(root.querySelector('.tree-category')).toBeNull();expect(root.querySelector('.object-table tbody')?.textContent).toContain('customers');expect(bridge.ListObjects).toHaveBeenCalledTimes(1)
+  button('刷新').click();await settle();expect(database.getAttribute('aria-expanded')).toBe('false')
+  await doubleClick(database);expect(database.getAttribute('aria-expanded')).toBe('true');expect(bridge.ListObjects).toHaveBeenCalledTimes(2)
+ })
+ it('returns from a database to its connection and ignores any table response still in flight',async()=>{
+  records=[savedProfile,{...savedProfile,id:'other-profile',name:'另一个连接'}];bridge.ListSessions.mockResolvedValue(records.map(p=>({id:p.id,connected:true,databases:['test_db'],serverVersion:'test',currentUser:'test',latencyMs:1,connectedAt:''})))
+  await mount();const connection=root.querySelector<HTMLButtonElement>('.tree-connection')!;await doubleClick(connection)
+  root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();connection.click();await settle();expect(connection.classList.contains('selected')).toBe(true);expect(root.querySelector('.object-table tbody')?.textContent).toContain('test_db');expect(root.querySelector('.object-table tbody')?.textContent).not.toContain('customers');expect(root.querySelector('.information-heading')?.textContent).toContain('开发服务器')
+  let release:(result:unknown)=>void=()=>{};bridge.ListObjects.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve}))
+  root.querySelector<HTMLButtonElement>('.tree-database')!.click();await settle();connection.click();await settle();release({objects:[{name:'stale_table',kind:'tables'}],truncated:false});await settle();expect(connection.classList.contains('selected')).toBe(true);expect(root.querySelector('.object-table tbody')?.textContent).toContain('test_db');expect(root.querySelector('.object-table tbody')?.textContent).not.toContain('stale_table')
+  root.querySelectorAll<HTMLButtonElement>('.tree-connection')[1].click();await settle();expect(root.querySelector('.information-heading')?.textContent).toContain('另一个连接');expect(bridge.Disconnect).not.toHaveBeenCalled()
+ })
+ it('keeps a database collapsed when an earlier table request finishes after a second double click',async()=>{
+  records=[savedProfile];let release:(result:unknown)=>void=()=>{};bridge.ListObjects.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve}))
+  await mount();await doubleClick(root.querySelector('.tree-connection')!);const database=root.querySelector<HTMLButtonElement>('.tree-database')!
+  await doubleClick(database);await doubleClick(database);expect(bridge.ListObjects).toHaveBeenCalledTimes(1)
+  release({objects:[{name:'loaded_table',kind:'tables'}],truncated:false});await settle();expect(database.getAttribute('aria-expanded')).toBe('false');expect(root.querySelector('.tree-category')).toBeNull();expect(root.querySelector('.object-table tbody')?.textContent).toContain('loaded_table')
  })
  it('enables SSH and PHP tunnel settings while keeping their credentials out of profile results',async()=>{
   await mount();createDialog();await settle();await fill('#connection-name','隧道测试');button('SSH',root.querySelector('.connection-tabbar')!).click();await settle();const ssh=root.querySelector<HTMLInputElement>('#connection-panel-ssh .native-check input')!;ssh.checked=true;ssh.dispatchEvent(new Event('change',{bubbles:true}));await settle();await fill('#ssh-host','ssh.example.test');await fill('#ssh-user','qa');await fill('#ssh-password','qa-ssh-password')
