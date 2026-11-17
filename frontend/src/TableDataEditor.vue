@@ -1,24 +1,27 @@
 <script setup lang="ts">
-import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
+import {computed,nextTick,onMounted,onUnmounted,ref,shallowRef,watch} from 'vue'
 import {Plus,Save,Trash2,RefreshCw,Search,ChevronLeft,ChevronRight,ChevronsLeft,LayoutGrid,List,Undo2,LoaderCircle,Square,Columns3,SlidersHorizontal,PanelRight,GitBranch,Check,RotateCcw,X} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile,type QueryResult} from './api'
 import {deleteRowSQL,makeDraft,metadataSQL,pageSQL,readColumns,readIndexes,saveRowSQL,uniqueKey,type CellDraft,type TableColumn,type TableFilter,type TableIndex,type TableSection} from './tableEditing'
 import {clampColumnWidth,defaultColumnWidth,readColumnLayout} from './tablePresentation'
 import {cellClipboardText,copyTableRecord,type TableCopyFormat} from './tableClipboard'
 import {useMenuDismissal} from './menuDismissal'
+import {gridRowHeight,useVirtualTableRows} from './virtualTableRows'
 const instanceID=crypto.randomUUID()
 const props=defineProps<{profile:Profile;database:string;table:string;section:TableSection;active:boolean;connected:boolean;sessionKey:string}>()
 type Confirmation={title:string;body:string;label:string;action:()=>void|Promise<void>}
 const emit=defineEmits<{confirm:[request:Confirmation];dirty:[value:boolean];section:[value:TableSection]}>()
 class StatementError extends Error{}
 const sections:[TableSection,string][]=[['data','数据'],['fields','字段'],['indexes','索引'],['foreignKeys','外键'],['triggers','触发器']]
-const section=ref<TableSection>(props.section),view=ref<'form'|'grid'>('grid'),running=ref(false),error=ref(''),message=ref(''),columns=ref<TableColumn[]>([]),indexes=ref<TableIndex[]>([]),foreignKeys=ref<QueryResult>(),triggers=ref<QueryResult>(),data=ref<QueryResult>(),page=ref(1),pageInput=ref(1),selectedIndex=ref(-1),original=ref<(string|null)[]>(),draft=ref<CellDraft[]>([]),isNew=ref(false),baseline=ref('[]'),uncertain=ref(false),sessionChanged=ref(false),sort=ref(''),descending=ref(false)
+const section=ref<TableSection>(props.section),view=ref<'form'|'grid'>('grid'),running=ref(false),error=ref(''),message=ref(''),columns=ref<TableColumn[]>([]),indexes=ref<TableIndex[]>([]),foreignKeys=ref<QueryResult>(),triggers=ref<QueryResult>(),data=shallowRef<QueryResult>(),page=ref(1),pageInput=ref(1),selectedIndex=ref(-1),original=ref<(string|null)[]>(),draft=ref<CellDraft[]>([]),isNew=ref(false),baseline=ref('[]'),uncertain=ref(false),sessionChanged=ref(false),sort=ref(''),descending=ref(false)
 const selectedColumn=ref<number|null>(null),editingColumn=ref<number|null>(null)
 let cellBeforeEdit:CellDraft|undefined
 type CellRow=number|'new'
 const filter=ref<TableFilter>({column:'',operator:'contains',value:''}),appliedFilter=ref<TableFilter>({...filter.value})
 const keys=computed(()=>uniqueKey(columns.value,indexes.value)),rows=computed(()=>data.value?.rows??[]),hasNext=computed(()=>!!data.value?.truncated),dirty=computed(()=>isNew.value||JSON.stringify(draft.value)!==baseline.value)
 const hasRecord=computed(()=>draft.value.length===columns.value.length&&columns.value.length>0&&(isNew.value||!!original.value))
+const gridRowCount=computed(()=>rows.value.length+(isNew.value&&hasRecord.value?1:0))
+const {viewport:gridViewport,header:gridHeader,windowRows:gridWindow,scrollToRow}=useVirtualTableRows(gridRowCount,()=>props.active&&section.value==='data'&&view.value==='grid')
 const canWrite=computed(()=>props.connected&&!running.value&&!uncertain.value&&!sessionChanged.value&&hasRecord.value&&(isNew.value||keys.value.length>0))
 const transactionID=ref(''),transactionPending=ref(false),transactionUncertain=ref(false)
 const showFilters=ref(false),showColumns=ref(false),showCellEditor=ref(false),filterSort=ref(''),filterDescending=ref(false)
@@ -46,7 +49,8 @@ function resetColumnWidth(column?:TableColumn){if(column)delete columnWidths.val
 function setColumnWidth(column:TableColumn,event:Event){const input=event.target as HTMLInputElement,width=Number(input.value);if(Number.isFinite(width)){columnWidths.value[column.name]=clampColumnWidth(width);persistColumnLayout()}input.value=String(columnWidth(column))}
 function toggleColumn(column:TableColumn){if(hiddenColumns.value.has(column.name))hiddenColumns.value.delete(column.name);else if(visibleColumns.value.length>1)hiddenColumns.value.add(column.name);persistColumnLayout()}
 function allColumns(){hiddenColumns.value.clear();persistColumnLayout()}
-function gridCellText(row:CellRow,column:number){return cellText(row,column).replace(/\r\n|\r|\n/g,' ')}
+function gridCellText(row:CellRow,column:number){return cellText(row,column).slice(0,2048).replace(/\r\n|\r|\n/g,' ')}
+function scrollCellText(event:WheelEvent){const input=event.currentTarget as HTMLTextAreaElement,delta=event.deltaX||(event.shiftKey?event.deltaY:0);if(!delta)return;const previous=input.scrollLeft;input.scrollLeft+=delta*(event.deltaMode===1?16:event.deltaMode===2?input.clientWidth:1);if(input.scrollLeft!==previous){event.preventDefault();event.stopPropagation()}}
 function toggleCellEditor(){finishCellEdit();if(!showCellEditor.value&&selectedColumn.value===null&&columns.value.length)selectedColumn.value=0;showCellEditor.value=!showCellEditor.value;showColumns.value=false}
 function sideInput(event:Event){const index=selectedColumn.value,field=selectedField.value;if(index===null||!field||!editable(field))return;draft.value[index]={mode:'value',value:(event.target as HTMLTextAreaElement).value}}
 function sideColumn(event:Event){finishCellEdit();selectedColumn.value=Number((event.target as HTMLSelectElement).value)}
@@ -108,7 +112,7 @@ function selectCell(row:CellRow,column:number){
  if(row!=='new')guard(()=>{pick(row);selectedColumn.value=column})
 }
 function startCellEdit(row:CellRow,column:number){
- const start=()=>{if(row!=='new'&&!currentRow(row))pick(row);const field=columns.value[column];if(!currentRow(row)||!field||!editable(field))return;if(editingColumn.value===column)return;finishCellEdit();selectedColumn.value=column;cellBeforeEdit={...draft.value[column]!};editingColumn.value=column;void nextTick(()=>{if(editingColumn.value!==column||!currentRow(row))return;const input=document.getElementById(cellID(row,column)+'-input') as HTMLTextAreaElement|null;input?.focus();input?.select()})}
+ const start=()=>{if(row!=='new'&&!currentRow(row))pick(row);const field=columns.value[column];if(!currentRow(row)||!field||!editable(field))return;if(editingColumn.value===column)return;finishCellEdit();selectedColumn.value=column;cellBeforeEdit={...draft.value[column]!};editingColumn.value=column;void nextTick(()=>{if(editingColumn.value!==column||!currentRow(row))return;const input=document.getElementById(cellID(row,column)+'-input') as HTMLTextAreaElement|null;input?.focus({preventScroll:true});input?.select();if(input)input.scrollLeft=0})}
  if(currentRow(row))start();else if(row!=='new')guard(start)
 }
 function finishCellEdit(column=editingColumn.value,cancel=false){if(column===null||editingColumn.value!==column)return;if(cancel&&cellBeforeEdit)draft.value[column]={...cellBeforeEdit};editingColumn.value=null;cellBeforeEdit=undefined}
@@ -117,7 +121,7 @@ function inputCell(column:number,event:Event){if(editingColumn.value!==column||!
 async function loadPage(number:number){
  const response=await request(pageSQL(props.database,props.table,columns.value,keys.value,number,appliedFilter.value,sort.value,descending.value)),result=response.results[0]
  if(!result||result.columns.length!==columns.value.length||result.columns.some((name,i)=>name!==columns.value[i]?.name)||result.rows.some(row=>row.length!==columns.value.length))throw new Error('表结构已变化，请刷新表结构后重试')
- data.value=result;page.value=number;pageInput.value=number;uncertain.value=false;pick(result.rows.length?0:-1)
+ data.value=result;page.value=number;pageInput.value=number;uncertain.value=false;pick(result.rows.length?0:-1);scrollToRow(0)
 }
 async function initialize(){
  const response=await request(metadataSQL(props.database,props.table));if(response.results.length!==4||response.results.some(r=>r.truncated))throw new Error('表结构信息不完整或超过当前显示上限，请在查询页查看')
@@ -133,7 +137,7 @@ function search(){guard(()=>perform(async()=>{const previous=appliedFilter.value
 function resetSearch(){guard(()=>perform(async()=>{const previous=appliedFilter.value,previousSort=sort.value,previousDescending=descending.value;filter.value={column:'',operator:'contains',value:''};appliedFilter.value={...filter.value};filterSort.value='';filterDescending.value=false;sort.value='';descending.value=false;try{await loadPage(1)}catch(e){appliedFilter.value=previous;sort.value=previousSort;descending.value=previousDescending;throw e}}))}
 function changeSort(name:string){guard(()=>perform(async()=>{const previous=sort.value,wasDescending=descending.value;descending.value=sort.value===name?!descending.value:false;sort.value=name;filterSort.value=name;filterDescending.value=descending.value;try{await loadPage(1)}catch(e){sort.value=previous;descending.value=wasDescending;throw e}}))}
 function selectSection(value:TableSection){section.value=value;emit('section',value)}
-function add(){if(!props.connected||!columns.value.length)return;guard(()=>{finishCellEdit();isNew.value=true;original.value=undefined;draft.value=makeDraft(columns.value,undefined);baseline.value=JSON.stringify(draft.value);selectedColumn.value=null;selectSection('data');uncertain.value=false;if(view.value==='grid')void nextTick(()=>document.getElementById('new-row-'+instanceID)?.scrollIntoView?.({block:'nearest'}))})}
+function add(){if(!props.connected||!columns.value.length)return;guard(()=>{finishCellEdit();isNew.value=true;original.value=undefined;draft.value=makeDraft(columns.value,undefined);baseline.value=JSON.stringify(draft.value);selectedColumn.value=null;selectSection('data');uncertain.value=false;if(view.value==='grid')void nextTick(()=>scrollToRow(rows.value.length))})}
 function undo(){if(running.value)return;pick(rows.value.length?Math.max(0,selectedIndex.value):-1)}
 function editable(column:TableColumn){return canWrite.value&&!column.generated&&!column.spatial}
 async function mutate(sql:string,operation:'save'|'delete'){
@@ -148,6 +152,7 @@ function recordLabel(row:(string|null)[],index:number){const values=keys.value.m
 const fkLabels=['约束','字段','引用库','引用表','引用字段','更新规则','删除规则']
 watch(()=>dirty.value||!!transactionID.value,value=>emit('dirty',value),{immediate:true})
 watch([view,section,()=>props.active],()=>{finishCellEdit();closeContext();showColumns.value=false})
+watch(gridWindow,range=>{const index=isNew.value?rows.value.length:selectedIndex.value;if(editingColumn.value!==null&&(index<range.start||index>=range.end))finishCellEdit()})
 watch(running,value=>{if(value)finishCellEdit()},{flush:'sync'})
 watch(()=>props.section,value=>{section.value=value})
 watch(()=>props.sessionKey,(value,old)=>{if(old&&value!==old){sessionChanged.value=true;transactionID.value='';transactionPending.value=false}})
@@ -187,21 +192,23 @@ onUnmounted(()=>{disposed=true;releaseColumnResize?.();window.removeEventListene
      </div>
     </div><p v-else-if="!running" class="table-data-empty">没有记录，可点击“新增”添加数据。</p>
    </template>
-   <div v-else class="table-data-grid" tabindex="0" aria-label="数据网格，可横向滚动" title="可用触控板或 Shift + 滚轮横向滚动"><table role="grid" :aria-label="table+'数据'" :style="{width:gridWidth+'px',minWidth:gridWidth+'px'}"><colgroup><col style="width:44px"/><col v-for="item in visibleColumns" :key="item.column.name" :style="{width:columnWidth(item.column)+'px'}"/></colgroup><thead><tr><th class="row-number">#</th><th v-for="item in visibleColumns" :key="item.column.name" :title="item.column.name+' · '+item.column.type"><button @click="changeSort(item.column.name)" :disabled="running">{{item.column.name}}<span v-if="sort===item.column.name">{{descending?' ▼':' ▲'}}</span><small>{{item.column.type}}{{item.column.binary?' · HEX':''}}</small></button><span class="table-column-resizer" role="separator" aria-orientation="vertical" :aria-label="'调整'+item.column.name+'列宽'" :aria-valuenow="columnWidth(item.column)" aria-valuemin="72" aria-valuemax="1200" tabindex="0" @pointerdown="resizeColumn($event,item.column)" @click.stop @dblclick.stop="resetColumnWidth(item.column)" @keydown="resizeColumnKeys($event,item.column)"></span></th></tr></thead><tbody>
-    <tr v-for="(row,index) in rows" :key="index" :class="{selected:!isNew&&index===selectedIndex}">
+   <div v-else ref="gridViewport" class="table-data-grid" :style="{'--table-grid-row-height':gridRowHeight+'px'}" tabindex="0" aria-label="数据网格，可横向滚动"><table role="grid" :aria-rowcount="gridRowCount+1" :aria-colcount="visibleColumns.length+1" :aria-label="table+'数据'" :style="{width:gridWidth+'px',minWidth:gridWidth+'px'}"><colgroup><col style="width:44px"/><col v-for="item in visibleColumns" :key="item.column.name" :style="{width:columnWidth(item.column)+'px'}"/></colgroup><thead ref="gridHeader"><tr aria-rowindex="1"><th class="row-number">#</th><th v-for="item in visibleColumns" :key="item.column.name" :title="item.column.name+' · '+item.column.type"><button @click="changeSort(item.column.name)" :disabled="running">{{item.column.name}}<span v-if="sort===item.column.name">{{descending?' ▼':' ▲'}}</span><small>{{item.column.type}}{{item.column.binary?' · HEX':''}}</small></button><span class="table-column-resizer" role="separator" aria-orientation="vertical" :aria-label="'调整'+item.column.name+'列宽'" :aria-valuenow="columnWidth(item.column)" aria-valuemin="72" aria-valuemax="1200" tabindex="0" @pointerdown="resizeColumn($event,item.column)" @click.stop @dblclick.stop="resetColumnWidth(item.column)" @keydown="resizeColumnKeys($event,item.column)"></span></th></tr></thead><tbody>
+    <tr v-if="gridWindow.before" class="table-virtual-spacer" aria-hidden="true"><td :colspan="visibleColumns.length+1" :style="{height:gridWindow.before+'px'}"></td></tr>
+    <template v-for="index in gridWindow.indices" :key="index"><tr v-if="index<rows.length" :aria-rowindex="index+2" :class="{selected:!isNew&&index===selectedIndex}">
      <td class="row-number" @click="selectRecord(index)">{{(page-1)*1000+index+1}}</td>
      <td v-for="{column,index:i} in visibleColumns" :id="cellID(index,i)" :key="i" :class="{'cell-selected':!isNew&&index===selectedIndex&&selectedColumn===i}" :tabindex="!isNew&&index===selectedIndex&&selectedColumn===i?0:-1" @click="selectCell(index,i)" @dblclick.stop="startCellEdit(index,i)" @contextmenu="contextCell($event,index,i)">
       <div v-if="hasRecord&&!isNew&&index===selectedIndex&&editingColumn===i&&columns[i]" class="grid-cell-editor" @click.stop @dblclick.stop>
-       <textarea :id="cellID(index,i)+'-input'" :value="draft[i]!.mode==='value'?draft[i]!.value:''" @input="inputCell(i,$event)" :aria-label="columns[i]!.name" :readonly="!editable(columns[i]!)" :placeholder="draft[i]!.mode==='null'?'NULL':''" rows="1" spellcheck="false" @blur="finishCellEdit(i)" @keydown="cellKeys($event,i)"/>
+       <textarea :id="cellID(index,i)+'-input'" :value="draft[i]!.mode==='value'?draft[i]!.value:''" @input="inputCell(i,$event)" :aria-label="columns[i]!.name" :readonly="!editable(columns[i]!)" :placeholder="draft[i]!.mode==='null'?'NULL':''" rows="1" wrap="off" spellcheck="false" @wheel="scrollCellText" @blur="finishCellEdit(i)" @keydown="cellKeys($event,i)"/>
       </div>
       <span v-else :class="{null:cellValue(index,i).mode==='null'}">{{gridCellText(index,i)}}</span>
      </td>
     </tr>
-    <tr v-if="isNew&&hasRecord" :id="'new-row-'+instanceID" class="selected"><td class="row-number">新增</td><td v-for="{column,index:i} in visibleColumns" :id="cellID('new',i)" :key="column.name" :class="{'cell-selected':selectedColumn===i}" :tabindex="selectedColumn===i?0:-1" @click="selectCell('new',i)" @dblclick.stop="startCellEdit('new',i)" @contextmenu="contextCell($event,'new',i)">
+    <tr v-else-if="isNew&&hasRecord" :id="'new-row-'+instanceID" :aria-rowindex="index+2" class="selected"><td class="row-number">新增</td><td v-for="{column,index:i} in visibleColumns" :id="cellID('new',i)" :key="column.name" :class="{'cell-selected':selectedColumn===i}" :tabindex="selectedColumn===i?0:-1" @click="selectCell('new',i)" @dblclick.stop="startCellEdit('new',i)" @contextmenu="contextCell($event,'new',i)">
      <div v-if="editingColumn===i" class="grid-cell-editor" @click.stop @dblclick.stop>
-      <textarea :id="cellID('new',i)+'-input'" :value="draft[i]!.mode==='value'?draft[i]!.value:''" @input="inputCell(i,$event)" :aria-label="column.name" :readonly="!editable(column)" :placeholder="draft[i]!.mode==='default'?column.defaultValue??'使用数据库默认值':draft[i]!.mode==='null'?'NULL':''" rows="1" spellcheck="false" @blur="finishCellEdit(i)" @keydown="cellKeys($event,i)"/>
+      <textarea :id="cellID('new',i)+'-input'" :value="draft[i]!.mode==='value'?draft[i]!.value:''" @input="inputCell(i,$event)" :aria-label="column.name" :readonly="!editable(column)" :placeholder="draft[i]!.mode==='default'?column.defaultValue??'使用数据库默认值':draft[i]!.mode==='null'?'NULL':''" rows="1" wrap="off" spellcheck="false" @wheel="scrollCellText" @blur="finishCellEdit(i)" @keydown="cellKeys($event,i)"/>
      </div><span v-else :class="{null:draft[i]!.mode==='null',default:draft[i]!.mode==='default'}">{{gridCellText('new',i)}}</span>
-    </td></tr>
+    </td></tr></template>
+    <tr v-if="gridWindow.after" class="table-virtual-spacer" aria-hidden="true"><td :colspan="visibleColumns.length+1" :style="{height:gridWindow.after+'px'}"></td></tr>
    </tbody></table><p v-if="!rows.length&&!isNew&&!running" class="table-data-empty">没有记录</p></div>
   </template>
   <div v-else class="table-metadata-content"><p class="table-data-note">仅展示当前账户可见的结构信息。</p>
