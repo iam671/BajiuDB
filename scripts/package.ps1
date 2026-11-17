@@ -47,6 +47,18 @@ try {
 
     # Fixed names replace the previous package of this version; other versions remain intact.
     New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+    $previousExe = Join-Path $distDir "$name/BajiuDB.exe"
+    $inUse = @(Get-Process -Name 'BajiuDB' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $previousExe })
+    if ($inUse.Count -gt 0 -and (Test-Path -LiteralPath $previousExe)) {
+        # A running Windows image can be renamed but cannot be deleted. Keep the
+        # current session alive while publishing the already-validated new package.
+        $heldRoot = [IO.Path]::GetFullPath((Join-Path $projectDir '.local/package-in-use'))
+        $heldDir = [IO.Path]::GetFullPath((Join-Path $heldRoot ([Guid]::NewGuid().ToString('N'))))
+        if (-not $heldDir.StartsWith($heldRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid in-use package directory.' }
+        New-Item -ItemType Directory -Path $heldDir -Force | Out-Null
+        Move-Item -LiteralPath $previousExe -Destination (Join-Path $heldDir 'BajiuDB.exe')
+        Write-Warning 'The current app session remains open. Close it before opening the updated release.'
+    }
     foreach ($output in @($name, "$name.zip", "$name.sha256")) {
         Remove-Output (Join-Path $distDir $output) $distDir
         Move-Item -LiteralPath (Join-Path $stage $output) -Destination $distDir
