@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import {nextTick,onMounted,onUnmounted,ref} from 'vue'
+import {nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
 import {Play,Square,Plug,Database,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminResult,type Profile} from './api'
 
 const props=defineProps<{profile:Profile;database:string;initialSQL:string;active:boolean;connected:boolean}>()
+const emit=defineEmits<{dirty:[value:boolean]}>()
 const sql=ref(props.initialSQL),editor=ref<HTMLTextAreaElement>(),running=ref(false),stopping=ref(false),error=ref(''),message=ref(''),result=ref<AdminResult|null>(null)
+watch([sql,running],()=>emit('dirty',sql.value!==props.initialSQL||running.value),{immediate:true,flush:'sync'})
 let task='',disposed=false
 async function focusEditor(){await nextTick();if(props.active&&!disposed)editor.value?.focus()}
 async function execute(){

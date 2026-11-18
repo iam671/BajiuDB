@@ -80,13 +80,13 @@ const nativeWindows=hasNativeWindows()
 const menu = ref('')
 const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:''})
 const databaseTool=ref<{profile:Profile;database:string;mode:DatabaseToolMode;table?:string;initialSQL?:string}|null>(null)
-type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
+type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string;dirty:boolean}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
 const activeDocument=computed(()=>workspaceTabs.value.find(tab=>tab.id===activeWorkspaceTab.value))
 let querySequence=0
 function activateWorkspaceTab(id:string,focusTab=false){activeWorkspaceTab.value=id;nextTick(()=>{const tab=document.getElementById('workspace-tab-'+id);tab?.scrollIntoView?.({block:'nearest',inline:'nearest'});if(focusTab)tab?.focus();else if(id!=='objects')document.getElementById('workspace-panel-'+id)?.querySelector<HTMLTextAreaElement>('textarea')?.focus()})}
 function createQueryTab(profile:Profile,database:string,table?:string){
- const tab:WorkspaceDocument={kind:'query',id:crypto.randomUUID(),title:'查询 '+(++querySequence),profile:{...profile},database,initialSQL:table?'SELECT * FROM '+quoteIdentifier(table)+' LIMIT 1000;':''}
+ const tab:WorkspaceDocument={kind:'query',id:crypto.randomUUID(),title:'查询 '+(++querySequence),profile:{...profile},database,initialSQL:table?'SELECT * FROM '+quoteIdentifier(table)+' LIMIT 1000;':'',dirty:false}
  workspaceTabs.value.push(tab);activateWorkspaceTab(tab.id)
 }
 function removeWorkspaceTab(id:string){const index=workspaceTabs.value.findIndex(tab=>tab.id===id);if(index<0)return;const active=activeWorkspaceTab.value===id;workspaceTabs.value.splice(index,1);if(active)activateWorkspaceTab(workspaceTabs.value[index]?.id??workspaceTabs.value[index-1]?.id??'objects',true)}
@@ -125,7 +125,7 @@ const dialogRef = ref<InstanceType<typeof ConnectionDialog>|null>(null)
 const errors = reactive<Record<string,string>>({})
 const testResult = ref<TestResult|null>(null)
 const testError = ref('')
-const confirm = reactive({open:false,title:'',body:'',label:'',danger:false,action:null as null|(()=>void|Promise<void>)})
+const confirm = reactive({open:false,title:'',body:'',label:'',danger:false,exit:false,action:null as null|(()=>void|Promise<void>)})
 const about = ref(false)
 const detailDialog=ref<DialogDetails>()
 const indexFieldsPicker=ref<IndexFieldsRequest>()
@@ -193,7 +193,13 @@ function showNavigationError(text:string){navigationError.value=text}
 function clearFeedback(){testResult.value=null;testError.value='';for(const key of Object.keys(errors))delete errors[key]}
 function requestInput(){const {createdAt:_,updatedAt:__,hasPassword:___,...input}=form;return {...input,port:Number(form.port),timeout:Number(form.timeout)}}
 function connectionInput(p:Profile){const input=fromProfile(p);if(transientPasswords.has(p.id))Object.assign(input,transientPasswords.get(p.id),{passwordAction:'replace',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace'});const {createdAt:_,updatedAt:__,hasPassword:___,...request}=input;return request}
-function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false){Object.assign(confirm,{open:true,title,body,label,action,danger});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
+function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false){Object.assign(confirm,{open:true,title,body,label,action,danger,exit:false});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
+function requestQuit(){
+ if(confirm.open&&confirm.exit)return
+ const pending=workspaceTabs.value.some(tab=>tab.dirty)||(dialogOpen.value&&dirty.value)||!!indexFieldsPicker.value||!!tableNamePrompt.value||(groupEditor.active&&!!groupEditor.name.trim())
+ const quit=async()=>{try{if(desktop.value)await api.ConfirmQuitApp()}catch(e){showNavigationError(errorText(e))}}
+ if(pending){ask('退出并放弃未保存的修改？','当前有未保存内容、正在进行的查询或未提交事务。退出将放弃草稿并结束连接，已提交操作不会回滚。','放弃修改并退出',quit,true);confirm.exit=true}else void quit().catch(e=>showNavigationError(errorText(e)))
+}
 async function acceptConfirm(){const action=confirm.action;confirm.open=false;confirm.action=null;await action?.()}
 function cancelConfirm(){confirm.open=false;nextTick(()=>{if(dialogOpen.value)document.getElementById('connection-name')?.focus();else(document.querySelector('[data-tree-row]') as HTMLElement|null)?.focus()})}
 function focusReturn(){nextTick(()=>{if(returnFocus?.isConnected)returnFocus.focus();else(document.querySelector<HTMLElement>('.tree-connection.selected')??document.querySelector<HTMLElement>('.tree-group.selected')??document.querySelector<HTMLElement>('.tree-root'))?.focus()})}
@@ -450,7 +456,7 @@ function closeMenus(){menu.value='';contextMenu.open=false}
 function showMenu(name:string){contextMenu.open=false;menu.value=menu.value===name?'':name;nextTick(()=>document.querySelector<HTMLButtonElement>('.menu-popup button:not(:disabled)')?.focus())}
 function connectionMenu():MenuItem[]{return [{label:live.value?'关闭连接':'打开连接',shortcut:live.value?'':'Enter',disabled:!selected.value||!!busy.value,action:live.value?disconnect:()=>openConnection()},{label:'编辑连接…',disabled:!selected.value||!!busy.value,action:edit},{label:'复制连接…',disabled:!selected.value||!!busy.value,action:duplicate},{label:'删除连接',disabled:!selected.value||!!busy.value,danger:true,action:remove}]}
 function itemsFor(name:string):MenuItem[]{
-  if(name==='file')return [{label:'新建 MySQL 连接…',shortcut:'Ctrl+N',disabled:!!busy.value||!!fatalError.value,action:create},...connectionMenu(),{label:'退出',action:async()=>{if(desktop.value)await api.QuitApp()}}]
+  if(name==='file')return [{label:'新建 MySQL 连接…',shortcut:'Ctrl+N',disabled:!!busy.value||!!fatalError.value,action:create},...connectionMenu(),{label:'退出',action:requestQuit}]
   if(name==='view')return [{label:'刷新',shortcut:'F5',disabled:!live.value||!!busy.value,action:refresh},{label:'导航窗格',checked:showSidebar.value,action:()=>{showSidebar.value=!showSidebar.value}},{label:'信息窗格',checked:showInformation.value,action:()=>{showInformation.value=!showInformation.value}},{label:'详细信息',checked:viewMode.value==='details',action:()=>{viewMode.value='details'}},{label:'图标',checked:viewMode.value==='icons',action:()=>{viewMode.value='icons'}}]
   if(name==='tools')return [{label:'编辑连接…',disabled:!selected.value||!!busy.value,action:edit},{label:'复制主机地址',disabled:!selected.value,action:()=>copyText(selected.value?address(selected.value):'')}]
   if(name==='window')return profiles.value.length?profiles.value.map(p=>({label:p.name,checked:p.id===selectedID.value,action:()=>selectProfile(p)})):[{label:'没有打开的连接',disabled:true,action:()=>{}}]
@@ -480,6 +486,8 @@ watch(()=>JSON.stringify(form),()=>{testResult.value=null;testError.value=''})
 watch([leftWidth,rightWidth,showSidebar,showInformation,viewMode],()=>{try{localStorage.setItem('bajiu.workspace-layout',JSON.stringify({left:leftWidth.value,right:rightWidth.value,sidebar:showSidebar.value,info:showInformation.value,view:viewMode.value}))}catch{/* settings are optional */}})
 onMounted(async()=>{
  document.addEventListener('keydown',shortcuts)
+ window.addEventListener('bajiu:main-close',requestQuit)
+ if(nativeWindows)void Promise.resolve().then(()=>api.MainWindowReady()).catch(e=>showNavigationError(errorText(e)))
  try{const preferences=JSON.parse(localStorage.getItem('bajiu.workspace-layout')??'null');if(preferences){if(Number.isFinite(preferences.left))leftWidth.value=Math.min(400,Math.max(170,preferences.left));if(Number.isFinite(preferences.right))rightWidth.value=Math.min(360,Math.max(180,preferences.right));if(typeof preferences.sidebar==='boolean')showSidebar.value=preferences.sidebar;if(typeof preferences.info==='boolean')showInformation.value=preferences.info;if(['details','icons'].includes(preferences.view))viewMode.value=preferences.view}}catch{/* invalid preferences use defaults */}
  try{if(desktop.value){connectionGroups.value=await api.ListGroups();for(const g of connectionGroups.value)expandedGroups.add(g.id);profiles.value=await api.ListConnections();configPath.value=await api.ConfigPath();for(const session of await api.ListSessions())sessions[session.id]=session}}catch(e){fatalError.value=errorText(e)}finally{loading.value=false}
  poll=setInterval(async()=>{if(!desktop.value||busy.value)return;try{const list=await api.ListSessions();const ids=new Set(list.map(s=>s.id));for(const id of Object.keys(sessions))if(!ids.has(id)){delete sessions[id];clearDatabaseState(id);expandedConnections.delete(id);if(id===selectedID.value){selectedDatabase.value='';invalidateObjects()}}}catch{/* explicit refresh reports connection errors */}},15000)
@@ -510,7 +518,7 @@ function nativeDialogAction(key:string,event:DialogAction){
  else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')closeDatabaseTool()}
 }
 useNativeDialogs(nativeDialogDefinitions,nativeDialogAction,showNavigationError)
-onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);releaseDrag?.();transientPasswords.clear()})
+onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);window.removeEventListener('bajiu:main-close',requestQuit);releaseDrag?.();transientPasswords.clear()})
 </script>
 
 <template>
@@ -579,7 +587,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
            <div class="object-tab-strip" role="tablist" aria-label="工作区标签页">
             <button id="workspace-tab-objects" class="object-tab" :class="{active:activeWorkspaceTab==='objects'}" role="tab" :aria-selected="activeWorkspaceTab==='objects'" aria-controls="workspace-panel-objects" :tabindex="activeWorkspaceTab==='objects'?0:-1" @click="activateWorkspaceTab('objects')" @keydown="workspaceTabKeys($event,'objects')"><FolderOpen :size="14"/>对象</button>
             <div v-for="tab in workspaceTabs" :key="tab.id" class="query-workspace-tab" :class="{active:activeWorkspaceTab===tab.id}" role="presentation">
-             <button :id="'workspace-tab-'+tab.id" class="object-tab query-tab-button" :class="{active:activeWorkspaceTab===tab.id}" role="tab" :aria-selected="activeWorkspaceTab===tab.id" :aria-controls="'workspace-panel-'+tab.id" :tabindex="activeWorkspaceTab===tab.id?0:-1" :title="tab.title+' · '+tab.profile.name+' / '+tab.database" @click="activateWorkspaceTab(tab.id)" @keydown="workspaceTabKeys($event,tab.id)"><component :is="tab.kind==='table'?Table2:tab.kind==='design'?Pencil:FileCode2" :size="14"/><span>{{tab.title}}{{tab.kind!=='query'&&tab.dirty?' *':''}}</span></button>
+             <button :id="'workspace-tab-'+tab.id" class="object-tab query-tab-button" :class="{active:activeWorkspaceTab===tab.id}" role="tab" :aria-selected="activeWorkspaceTab===tab.id" :aria-controls="'workspace-panel-'+tab.id" :tabindex="activeWorkspaceTab===tab.id?0:-1" :title="tab.title+' · '+tab.profile.name+' / '+tab.database" @click="activateWorkspaceTab(tab.id)" @keydown="workspaceTabKeys($event,tab.id)"><component :is="tab.kind==='table'?Table2:tab.kind==='design'?Pencil:FileCode2" :size="14"/><span>{{tab.title}}{{tab.dirty?' *':''}}</span></button>
              <button class="query-tab-close" :tabindex="activeWorkspaceTab===tab.id?0:-1" :aria-label="'关闭'+tab.title" :title="'关闭'+tab.title" @click.stop="closeWorkspaceTab(tab.id)"><X :size="12"/></button>
             </div>
            </div>
@@ -607,7 +615,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
           </div>
           <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
           </div>
-          <QueryEditor v-for="tab in queryDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :initialSQL="tab.initialSQL" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]"/>
+          <QueryEditor v-for="tab in queryDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :initialSQL="tab.initialSQL" @dirty="tab.dirty=$event" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]"/>
           <TableDesigner v-for="tab in designDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @saved="name=>designSaved(tab,name)" @details="detailDialog=$event" @index-fields="indexFieldsPicker=$event" @request-name="tableNamePrompt=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
           <TableDataEditor v-for="tab in tableDocuments" v-show="activeWorkspaceTab===tab.id" :id="'workspace-panel-'+tab.id" :key="tab.id" role="tabpanel" :aria-labelledby="'workspace-tab-'+tab.id" :profile="tab.profile" :database="tab.database" :table="tab.table" :section="tab.section" :active="activeWorkspaceTab===tab.id" :connected="!!sessions[tab.profile.id]" :sessionKey="sessions[tab.profile.id]?.connectedAt??''" @dirty="tab.dirty=$event" @section="tab.section=$event" @confirm="request=>ask(request.title,request.body,request.label,request.action,true)"/>
         </main>

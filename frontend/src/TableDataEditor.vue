@@ -14,6 +14,7 @@ const emit=defineEmits<{confirm:[request:Confirmation];dirty:[value:boolean];sec
 class StatementError extends Error{}
 const sections:[TableSection,string][]=[['data','数据'],['fields','字段'],['indexes','索引'],['foreignKeys','外键'],['triggers','触发器']]
 const section=ref<TableSection>(props.section),view=ref<'form'|'grid'>('grid'),running=ref(false),error=ref(''),message=ref(''),columns=ref<TableColumn[]>([]),indexes=ref<TableIndex[]>([]),foreignKeys=ref<QueryResult>(),triggers=ref<QueryResult>(),data=shallowRef<QueryResult>(),page=ref(1),pageInput=ref(1),selectedIndex=ref(-1),original=ref<(string|null)[]>(),draft=ref<CellDraft[]>([]),isNew=ref(false),baseline=ref('[]'),uncertain=ref(false),sessionChanged=ref(false),sort=ref(''),descending=ref(false)
+const saveButton=ref<HTMLButtonElement>(),addButton=ref<HTMLButtonElement>()
 const selectedColumn=ref<number|null>(null),editingColumn=ref<number|null>(null)
 let cellBeforeEdit:CellDraft|undefined
 type CellRow=number|'new'
@@ -112,11 +113,22 @@ function selectCell(row:CellRow,column:number){
  if(row!=='new')guard(()=>{pick(row);selectedColumn.value=column})
 }
 function startCellEdit(row:CellRow,column:number){
- const start=()=>{if(row!=='new'&&!currentRow(row))pick(row);const field=columns.value[column];if(!currentRow(row)||!field||!editable(field))return;if(editingColumn.value===column)return;finishCellEdit();selectedColumn.value=column;cellBeforeEdit={...draft.value[column]!};editingColumn.value=column;void nextTick(()=>{if(editingColumn.value!==column||!currentRow(row))return;const input=document.getElementById(cellID(row,column)+'-input') as HTMLTextAreaElement|null;input?.focus({preventScroll:true});input?.select();if(input)input.scrollLeft=0})}
+ const start=()=>{if(row!=='new'&&!currentRow(row))pick(row);const field=columns.value[column];if(!currentRow(row)||!field||!editable(field))return;if(editingColumn.value===column)return;finishCellEdit();selectedColumn.value=column;cellBeforeEdit={...draft.value[column]!};editingColumn.value=column;void nextTick(()=>{if(editingColumn.value!==column||!currentRow(row))return;const input=document.getElementById(cellID(row,column)+'-input') as HTMLTextAreaElement|null;input?.focus({preventScroll:true});input?.scrollIntoView?.({block:'nearest',inline:'nearest'});input?.select();if(input)input.scrollLeft=0})}
  if(currentRow(row))start();else if(row!=='new')guard(start)
 }
 function finishCellEdit(column=editingColumn.value,cancel=false){if(column===null||editingColumn.value!==column)return;if(cancel&&cellBeforeEdit)draft.value[column]={...cellBeforeEdit};editingColumn.value=null;cellBeforeEdit=undefined}
-function cellKeys(event:KeyboardEvent,column:number){if(event.isComposing)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishCellEdit(column,true)}else if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();finishCellEdit(column)}else return;void nextTick(()=>document.getElementById(cellID(isNew.value?'new':selectedIndex.value,column))?.focus())}
+function cellKeys(event:KeyboardEvent,column:number){
+ if(event.isComposing)return
+ if(event.key==='Tab'&&isNew.value){
+  event.preventDefault();event.stopPropagation()
+  const candidates=(view.value==='grid'?visibleColumns.value:columns.value.map((column,index)=>({column,index}))).filter(item=>editable(item.column)),position=candidates.findIndex(item=>item.index===column),next=candidates[position+(event.shiftKey?-1:1)]
+  finishCellEdit(column)
+  if(next)startCellEdit('new',next.index);else void nextTick(()=>{if(event.shiftKey)addButton.value?.focus();else saveButton.value?.focus()})
+  return
+ }
+ if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishCellEdit(column,true)}else if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();finishCellEdit(column)}else return
+ void nextTick(()=>document.getElementById(cellID(isNew.value?'new':selectedIndex.value,column))?.focus())
+}
 function inputCell(column:number,event:Event){if(editingColumn.value!==column||!draft.value[column])return;draft.value[column]={mode:'value',value:(event.target as HTMLTextAreaElement).value}}
 async function loadPage(number:number){
  const response=await request(pageSQL(props.database,props.table,columns.value,keys.value,number,appliedFilter.value,sort.value,descending.value)),result=response.results[0]
@@ -137,7 +149,7 @@ function search(){guard(()=>perform(async()=>{const previous=appliedFilter.value
 function resetSearch(){guard(()=>perform(async()=>{const previous=appliedFilter.value,previousSort=sort.value,previousDescending=descending.value;filter.value={column:'',operator:'contains',value:''};appliedFilter.value={...filter.value};filterSort.value='';filterDescending.value=false;sort.value='';descending.value=false;try{await loadPage(1)}catch(e){appliedFilter.value=previous;sort.value=previousSort;descending.value=previousDescending;throw e}}))}
 function changeSort(name:string){guard(()=>perform(async()=>{const previous=sort.value,wasDescending=descending.value;descending.value=sort.value===name?!descending.value:false;sort.value=name;filterSort.value=name;filterDescending.value=descending.value;try{await loadPage(1)}catch(e){sort.value=previous;descending.value=wasDescending;throw e}}))}
 function selectSection(value:TableSection){section.value=value;emit('section',value)}
-function add(){if(!props.connected||!columns.value.length)return;guard(()=>{finishCellEdit();isNew.value=true;original.value=undefined;draft.value=makeDraft(columns.value,undefined);baseline.value=JSON.stringify(draft.value);selectedColumn.value=null;selectSection('data');uncertain.value=false;if(view.value==='grid')void nextTick(()=>scrollToRow(rows.value.length))})}
+function add(){if(!props.connected||!columns.value.length)return;guard(async()=>{finishCellEdit();isNew.value=true;original.value=undefined;draft.value=makeDraft(columns.value,undefined);baseline.value=JSON.stringify(draft.value);selectedColumn.value=null;selectSection('data');uncertain.value=false;await nextTick();if(view.value==='grid'){scrollToRow(rows.value.length);await nextTick()}const first=(view.value==='grid'?visibleColumns.value:columns.value.map((column,index)=>({column,index}))).find(item=>editable(item.column));if(first)startCellEdit('new',first.index)})}
 function undo(){if(running.value)return;pick(rows.value.length?Math.max(0,selectedIndex.value):-1)}
 function editable(column:TableColumn){return canWrite.value&&!column.generated&&!column.spatial}
 async function mutate(sql:string,operation:'save'|'delete'){
@@ -163,12 +175,13 @@ onUnmounted(()=>{disposed=true;releaseColumnResize?.();window.removeEventListene
 <template><div class="table-data-editor">
  <nav class="table-section-tabs" aria-label="表内容"><button v-for="item in sections" :key="item[0]" :class="{active:section===item[0]}" @click="selectSection(item[0])">{{item[1]}}</button><span>{{profile.name}} / {{database}} / {{table}}</span></nav>
  <div class="table-data-toolbar" role="toolbar" aria-label="表数据操作"><template v-if="section==='data'">
+ <button ref="saveButton" class="native-button default-button" @click="save" :disabled="!canWrite||!dirty"><Save :size="13"/>保存</button><button ref="addButton" class="native-button" @click="add" :disabled="running||!connected||!columns.length||uncertain||sessionChanged"><Plus :size="13"/>新增</button><button class="native-button" @click="remove" :disabled="!canWrite||isNew"><Trash2 :size="13"/>删除</button>
  <button v-if="!transactionID" class="native-button" @click="beginTransaction" :disabled="running||!connected||!columns.length||profile.tunnelMode==='http'" :title="profile.tunnelMode==='http'?'PHP 中转暂不支持跨请求事务':'在独立会话中开始 InnoDB 事务'"><GitBranch :size="13"/>开始事务</button>
  <template v-else><button class="native-button" @click="commitTransaction" :disabled="running||dirty||transactionUncertain" title="先保存当前记录，再提交事务"><Check :size="13"/>提交事务</button><button class="native-button" @click="rollbackTransaction" :disabled="running"><RotateCcw :size="13"/>{{transactionUncertain?'结束事务':'回滚事务'}}</button><span class="table-transaction-state">{{transactionUncertain?'提交状态未确认':transactionPending?'事务中 · 未提交变更':'事务中'}}</span></template>
  <button class="native-button" @click="toggleCellEditor" :class="{pressed:showCellEditor}" :disabled="!columns.length"><PanelRight :size="13"/>单元格编辑器</button>
  <button class="native-button" @click="showFilters=!showFilters" :class="{pressed:showFilters}"><SlidersHorizontal :size="13"/>筛选 &amp; 排序</button>
  <button class="native-button" @click="showColumns=!showColumns;if(showColumns)showCellEditor=false" :class="{pressed:showColumns}" :disabled="!columns.length"><Columns3 :size="13"/>列</button>
- <button class="native-button" @click="add" :disabled="running||!connected||!columns.length||uncertain||sessionChanged"><Plus :size="13"/>新增</button><button class="native-button default-button" @click="save" :disabled="!canWrite||!dirty"><Save :size="13"/>保存</button><button class="native-button" @click="remove" :disabled="!canWrite||isNew"><Trash2 :size="13"/>删除</button><button class="native-button" @click="undo" :disabled="running||!dirty"><Undo2 :size="13"/>撤销修改</button></template><button class="native-button" @click="refresh" :disabled="running||!connected"><RefreshCw :size="13"/>刷新</button><button v-if="running" class="native-button" @click="stop"><Square :size="12"/>停止</button></div>
+ <button class="native-button" @click="undo" :disabled="running||!dirty"><Undo2 :size="13"/>撤销修改</button></template><button class="native-button" @click="refresh" :disabled="running||!connected"><RefreshCw :size="13"/>刷新</button><button v-if="running" class="native-button" @click="stop"><Square :size="12"/>停止</button></div>
  <div v-if="showColumns&&section==='data'" class="table-column-panel"><div class="table-column-actions"><button class="native-button" @click="allColumns">显示全部列</button><button class="native-button" @click="resetColumnWidth()">恢复默认列宽</button></div><div class="table-column-list"><label v-for="column in columns" :key="column.name"><input type="checkbox" :checked="!hiddenColumns.has(column.name)" :disabled="!hiddenColumns.has(column.name)&&visibleColumns.length===1" @change="toggleColumn(column)"/><span :title="column.name+' · '+column.type">{{column.name}}</span><input type="number" min="72" max="1200" :value="columnWidth(column)" :aria-label="column.name+'列宽'" @change="setColumnWidth(column,$event)"/><span>px</span></label></div></div>
  <p v-if="layoutWarning" class="table-data-notice">{{layoutWarning}}</p>
  <p v-if="!connected" class="table-data-notice">连接已关闭。重新打开“{{profile.name}}”后可继续操作，当前内容保留。</p>

@@ -14,7 +14,7 @@ export interface ObjectList {objects:DatabaseObject[];truncated:boolean}
 export interface ConnectionGroup {id:string;name:string}
 export interface AdminRequest {operation:string;name?:string;charset?:string;collation?:string;sql?:string;sqlMode?:string;includeData?:boolean;transactionId?:string}
 export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
-export interface AdminResult {results:QueryResult[];completed:number;error:string;text:string;transactionId?:string;transactionActive?:boolean}
+export interface AdminResult {results:QueryResult[];completed:number;error:string;errorCode?:number;text:string;transactionId?:string;transactionActive?:boolean}
 export interface DialogDetails {title:string;body:string;details:string;sql?:string}
 export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database'|'index-fields';title:string;width:number;height:number;payload:any;revision?:number}
 export interface DialogAction {id:string;action:string;payload:any}
@@ -29,7 +29,7 @@ type Bridge = {
   ListObjects(id:string,database:string,kind:string):Promise<ObjectList>;
   ConfigPath():Promise<string>; SelectCAFile():Promise<string>;
   SelectSSHKey():Promise<string>;TableDDL(id:string,database:string,table:string):Promise<string>;
-  QuitApp():Promise<void>;
+  QuitApp():Promise<void>;ConfirmQuitApp():Promise<void>;MainWindowReady():Promise<void>;
   DatabaseAdmin(task:string,id:string,database:string,request:AdminRequest):Promise<AdminResult>;
   CancelDatabaseTask(task:string):Promise<void>;OpenSQLFile():Promise<{path:string;text:string;statements:number}>;
   SaveDatabaseReport(name:string,text:string):Promise<string>;

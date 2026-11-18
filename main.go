@@ -24,7 +24,12 @@ func main() {
 		}
 	}}})
 	app.mainWindow = app.desktop.Window.NewWithOptions(application.WebviewWindowOptions{Name: "main", Title: "Bajiu DB · 捌玖", Width: 1240, Height: 820, MinWidth: 960, MinHeight: 680, URL: "/?desktop=1", BackgroundColour: application.NewRGB(245, 247, 250), Windows: application.WindowsWindow{Theme: application.Light}})
-	app.mainWindow.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) { app.desktop.Quit() })
+	app.mainWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if !app.quitApproved.Load() && app.mainReady.Load() {
+			event.Cancel()
+		}
+		go app.QuitApp()
+	})
 	if windowTrace == "1" {
 		for _, event := range []events.WindowEventType{events.Common.WindowDidMove, events.Common.WindowDidResize, events.Common.WindowRuntimeReady} {
 			app.mainWindow.OnWindowEvent(event, func(*application.WindowEvent) { app.traceWindows() })

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 )
 
 type App struct {
@@ -20,6 +21,8 @@ type App struct {
 	dialogs        map[string]*nativeDialog
 	stop           context.CancelFunc
 	dialogSequence uint64
+	mainReady      atomic.Bool
+	quitApproved   atomic.Bool
 }
 
 func NewApp() *App {
@@ -133,7 +136,19 @@ func (a *App) DeleteGroup(id string) error {
 	}
 	return a.service.DeleteGroup(id)
 }
-func (a *App) QuitApp() { a.desktop.Quit() }
+func (a *App) MainWindowReady() { a.mainReady.Store(true) }
+func (a *App) QuitApp() {
+	if !a.mainReady.Load() || a.quitApproved.Load() {
+		a.ConfirmQuitApp()
+		return
+	}
+	go dispatchWindow(a.mainWindow, "bajiu:main-close", nil)
+}
+func (a *App) ConfirmQuitApp() {
+	if a.quitApproved.CompareAndSwap(false, true) {
+		a.desktop.Quit()
+	}
+}
 func (a *App) SelectCAFile() (string, error) {
 	return a.desktop.Dialog.OpenFile().SetTitle("选择 CA 证书").AddFilter("PEM 证书", "*.pem;*.crt;*.cer").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 }

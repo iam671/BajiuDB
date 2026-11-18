@@ -5,7 +5,7 @@ import type {IndexFieldsRequest} from './IndexFieldsDialog.vue'
 import type {TableNameRequest} from './TableNameDialog.vue'
 import {defaults,type DialogDetails} from './api'
 import {parseDesign} from './tableDesigner'
-let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string,details:DialogDetails[],failure:string,pickers:IndexFieldsRequest[],namePrompts:TableNameRequest[]
+let app:App|undefined,root:HTMLDivElement,commands:string[],confirmations:{title:string;action:()=>void|Promise<void>}[],saved:string[],ddl:string,details:DialogDetails[],failure:string,failureCode:number,pickers:IndexFieldsRequest[],namePrompts:TableNameRequest[]
 const schema='utf8mb4_unicode_ci'
 const result=(columns:string[],rows:(string|null)[][])=>({columns,rows,truncated:false,affected:'0'})
 async function settle(){for(let i=0;i<16;i++){await Promise.resolve();await nextTick()}}
@@ -14,12 +14,12 @@ async function click(text:string){button(text).click();await settle()}
 async function input(label:string,value:string){const element=root.querySelector<HTMLInputElement|HTMLTextAreaElement>('[aria-label="'+label+'"]');if(!element)throw new Error('Input missing: '+label);element.value=value;element.dispatchEvent(new Event('input',{bubbles:true}));await settle()}
 async function mount(table?:string){app=createApp(TableDesigner,{profile:{...defaults(),id:'fake'},database:'qa',table,connected:true,active:true,sessionKey:'qa-session','onIndex-fields':(value:IndexFieldsRequest)=>pickers.push(value),'onRequest-name':(value:TableNameRequest)=>namePrompts.push(value),onDetails:(value:DialogDetails)=>details.push(value),onConfirm:(request:typeof confirmations[number])=>confirmations.push(request),onSaved:(name:string)=>saved.push(name)});app.mount(root);await settle()}
 beforeEach(()=>{
- localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';details=[];failure='';pickers=[];namePrompts=[];root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
+ localStorage.clear();commands=[];confirmations=[];saved=[];ddl='';details=[];failure='';failureCode=0;pickers=[];namePrompts=[];root=document.createElement('div');document.body.append(root);vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}})
  window.go={main:{App:{DatabaseAdmin:vi.fn(async(_task,_id,_db,req)=>{
   if(req.operation==='catalog')return {results:[result(['Collation','Charset','Id','Default'],[[schema,'utf8mb4','1',''],['utf8mb4_general_ci','utf8mb4','2','Yes'],['latin1_swedish_ci','latin1','3','Yes']])],completed:1,error:'',text:''}
   if(req.operation==='schema')return {results:[result(['DEFAULT_CHARACTER_SET_NAME','DEFAULT_COLLATION_NAME'],[['utf8mb4',schema]])],completed:1,error:'',text:''}
   commands.push(req.sql??'')
-  if(failure&&req.sqlMode!==undefined)return {results:[],completed:1,error:failure,text:''}
+  if(failure&&req.sqlMode!==undefined)return {results:[],completed:1,error:failure,errorCode:failureCode||undefined,text:''}
   if(req.sql?.startsWith('SELECT TRIGGER_NAME'))return {results:[result(['TRIGGER_NAME','ACTION_TIMING','EVENT_MANIPULATION','ACTION_STATEMENT'],[])],completed:1,error:'',text:''}
   if(req.sql?.startsWith('SHOW CREATE TABLE')){const design=parseDesign(ddl);return {results:[result(['Table','Create Table'],[['items',ddl]]),result(['sql_mode'],[['STRICT_TRANS_TABLES']]),result(['TRIGGER_NAME','ACTION_TIMING','EVENT_MANIPULATION','ACTION_STATEMENT'],[]),result(['Field','Collation'],design.fields.map(f=>[f.name,/^(?:char|varchar|text)$/i.test(f.type)?f.collation||design.options.collation||schema:null])),result(['TABLE_COLLATION'],[[design.options.collation||schema]])],completed:5,error:'',text:''}}
   if(req.sql?.includes('CREATE TABLE')){ddl=req.sql.slice(req.sql.indexOf('CREATE TABLE'));return {results:[],completed:2,error:'',text:''}}
@@ -28,6 +28,19 @@ beforeEach(()=>{
 })
 afterEach(()=>{app?.unmount();app=undefined;root.remove();delete window.go;vi.unstubAllGlobals()})
 describe('designer controls',()=>{
+ it('offers the duplicate name again on the next save without losing the field draft',async()=>{
+  await mount();await input('字段 1 名称','title');await click('选项');await input('表名','f_test1');await click('字段');failure="第 2 条语句失败：Error 1050 (42S01): Table 'f_test1' already exists";await click('保存')
+  expect(details.at(-1)?.details).toContain('1050');expect(namePrompts).toHaveLength(0);await click('保存');expect(namePrompts[0]?.value).toBe('f_test1');expect(root.querySelector<HTMLInputElement>('[aria-label="字段 1 名称"]')?.value).toBe('title')
+  await click('保存');expect(namePrompts).toHaveLength(2);failure='';await namePrompts[1]!.save('f_test2');await settle();expect(saved).toEqual(['f_test2']);expect(commands.at(-2)?.includes('f_test2')||commands.some(sql=>sql.includes('CREATE TABLE `qa`.`f_test2`'))).toBe(true)
+ })
+ it('uses a structured duplicate-table code from the tunnel even without an English message',async()=>{
+  await mount();await input('字段 1 名称','title');await click('选项');await input('表名','duplicate');await click('字段');failure='表已经存在';failureCode=1050;await click('保存');await click('保存');expect(namePrompts[0]?.value).toBe('duplicate')
+ })
+ it('suggests type and length only for new fields whose type settings have not been edited',async()=>{
+  await mount();await input('字段 1 名称','user_id');root.querySelector('[aria-label="字段 1 名称"]')!.dispatchEvent(new Event('change',{bubbles:true}));await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="字段 1 类型"]')?.value).toBe('bigint');expect(root.querySelector<HTMLInputElement>('[aria-label="user_id长度"]')?.value).toBe('20')
+  await input('字段 1 类型','varchar');await input('user_id长度','32');await input('字段 1 名称','price');root.querySelector('[aria-label="字段 1 名称"]')!.dispatchEvent(new Event('change',{bubbles:true}));await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="字段 1 类型"]')?.value).toBe('varchar');expect(root.querySelector<HTMLInputElement>('[aria-label="price长度"]')?.value).toBe('32')
+  app?.unmount();ddl='CREATE TABLE `items` (`title` varchar(80))';await mount('items');await input('字段 1 名称','id');root.querySelector('[aria-label="字段 1 名称"]')!.dispatchEvent(new Event('change',{bubbles:true}));await settle();expect(root.querySelector<HTMLInputElement>('[aria-label="字段 1 类型"]')?.value).toBe('varchar');expect(root.querySelector<HTMLInputElement>('[aria-label="id长度"]')?.value).toBe('80')
+ })
  it('requests the table name on save and continues saving on the current tab after naming',async()=>{
   await mount();await input('字段 1 名称','title');await click('保存');expect(namePrompts).toHaveLength(1);expect(commands.some(sql=>sql.includes('CREATE TABLE'))).toBe(false);expect(details).toHaveLength(0)
   await namePrompts[0]!.save('named');await settle();expect(saved).toEqual(['named']);expect(commands.some(sql=>sql.includes('CREATE TABLE `qa`.`named`'))).toBe(true);expect(root.querySelector('.designer-tabs button.active')?.textContent).toBe('字段')

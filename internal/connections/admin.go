@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 type AdminRequest struct {
@@ -34,12 +36,21 @@ type AdminResult struct {
 	Results           []QueryResult `json:"results"`
 	Completed         int           `json:"completed"`
 	Error             string        `json:"error"`
+	ErrorCode         uint16        `json:"errorCode,omitempty"`
 	Text              string        `json:"text"`
 	TransactionID     string        `json:"transactionId,omitempty"`
 	TransactionActive bool          `json:"transactionActive"`
 }
 type adminDatabase interface {
 	Admin(context.Context, string, AdminRequest) (AdminResult, error)
+}
+
+func adminErrorCode(err error) uint16 {
+	var serverError *mysql.MySQLError
+	if errors.As(err, &serverError) {
+		return serverError.Number
+	}
+	return 0
 }
 
 func (s *Service) Admin(ctx context.Context, id, database string, request AdminRequest) (AdminResult, error) {
@@ -175,6 +186,7 @@ func (d *mysqlDatabase) Admin(ctx context.Context, database string, request Admi
 			q, e := queryResult(ctx, conn, statement, 1000)
 			if e != nil {
 				result.Error = fmt.Sprintf("第 %d 条语句失败：%s", result.Completed+1, e)
+				result.ErrorCode = adminErrorCode(e)
 				return result, nil
 			}
 			result.Completed++
