@@ -85,7 +85,7 @@ const configPath = ref('')
 const desktop = ref(isDesktop())
 const nativeWindows=hasNativeWindows()
 const menu = ref('')
-const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:'',fromObjectList:false})
+const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table'|'table-blank',database:'',connectionID:'',table:'',fromObjectList:false})
 const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string}|null>(null)
 type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string;dirty:boolean}|{kind:'console';dirty:boolean}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
@@ -464,9 +464,9 @@ function passwordChanged(){form.passwordAction='replace';clearFeedback()}
 function forgetPassword(){form.password='';form.sshPassword='';form.sshKeyPassphrase='';form.httpToken='';form.passwordAction='forget';form.sshPasswordAction='replace';form.sshKeyPassphraseAction='replace';form.httpTokenAction='replace';form.rememberPassword=false;form.hasPassword=false}
 async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.caPath=path}catch(e){testError.value=errorText(e)}}
 async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
-function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table',fromObjectList=false){
+function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table'|'table-blank',fromObjectList=false){
  if(busy.value||dialogOpen.value||groupDialogOpen.value)return
- navigationError.value='';contextMenu.fromObjectList=fromObjectList;contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?(fromObjectList?300:260):230)));menu.value=''
+ navigationError.value='';contextMenu.fromObjectList=fromObjectList;contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?(fromObjectList?300:260):kind==='table-blank'?260:230)));menu.value=''
  nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
 }
 function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'connection')}
@@ -474,16 +474,40 @@ function contextForRoot(e:MouseEvent){selectRoot();showContext(e,'root')}
 function contextForGroup(e:MouseEvent,id:string){selectConnectionGroup(id);showContext(e,'group')}
 function contextForDatabase(e:MouseEvent,p:Profile,database:string){selectDatabaseInfo(p,database);contextMenu.database=database;contextMenu.connectionID=p.id;showContext(e,'database')}
 function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.object?.kind==='tables'&&selected.value){if(!workspaceRowSelected(row))selectWorkspaceRow(row);contextMenu.table=row.name;contextMenu.database=selectedDatabase.value;contextMenu.connectionID=selected.value.id;showContext(e,'table',true);return}if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
-function closeDatabase(p:Profile,database:string){clearTree(p.id,database);openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database);if(selectedID.value===p.id&&selectedDatabase.value===database){selectProfile(p);selectedRowKey.value=database;databaseNodeSelected.value=true}}
+function contextForObjectBlank(event:MouseEvent){
+ const target=event.target,p=selected.value,db=selectedDatabase.value
+ if(!(target instanceof Element)||target.closest('[data-object-key],thead,input,textarea,select,button,[role="separator"]')||!p||!db||category.value!=='tables'||busy.value||objectsLoading.value||!sessions[p.id])return
+ event.preventDefault();event.stopPropagation();applyObjectSelection([]);contextMenu.table='';contextMenu.database=db;contextMenu.connectionID=p.id;showContext(event,'table-blank')
+}
+function clearClosedDatabaseState(p:Profile,database:string){
+ clearTree(p.id,database);openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database)
+ if(selectedID.value===p.id&&selectedDatabase.value===database){selectedDatabase.value='';objectSearch.value='';invalidateObjects();selectedRowKey.value=database;databaseNodeSelected.value=true}
+}
+function closeDatabase(p:Profile,database:string,deleted=false){
+ const matches=(tab:WorkspaceDocument)=>tab.profile.id===p.id&&tab.database===database
+ const finish=()=>{
+  const old=workspaceTabs.value,index=old.findIndex(tab=>tab.id===activeWorkspaceTab.value),closingActive=index>=0&&matches(old[index]!)
+  workspaceTabs.value=old.filter(tab=>!matches(tab));clearClosedDatabaseState(p,database)
+  if(closingActive){const next=old.slice(index+1).find(tab=>!matches(tab))??old.slice(0,index).reverse().find(tab=>!matches(tab));activateWorkspaceTab(next?.id??'objects',true)}
+ }
+ const tabs=workspaceTabs.value.filter(matches)
+ if(deleted)clearClosedDatabaseState(p,database)
+ if(tabs.some(tab=>tab.dirty))ask('关闭数据库“'+database+'”及其标签页？',(deleted?'数据库已从服务器删除。':'')+'将关闭连接“'+p.name+'”中此数据库对应的 '+tabs.length+' 个标签页，其中有未保存内容、未提交事务或正在执行的操作。继续将放弃草稿、取消请求并请求回滚未提交的表事务；已提交操作不会回滚。','关闭数据库',finish,true)
+ else finish()
+}
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
 function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
 async function databaseChanged(operation:string,name:string){
  const target=databaseTool.value;if(!target)return
  if(operation==='table'){try{await refreshTableList(target.profile,target.database)}catch(e){showNavigationError(errorText(e))}return}
- try{sessions[target.profile.id]=await api.RefreshDatabases(target.profile.id);if(operation==='drop')closeDatabase(target.profile,target.database);else if(operation==='create'){selectProfile(target.profile);selectedRowKey.value=name;databaseNodeSelected.value=true}}
+ try{sessions[target.profile.id]=await api.RefreshDatabases(target.profile.id);if(operation==='drop')closeDatabase(target.profile,target.database,true);else if(operation==='create'){selectProfile(target.profile);selectedRowKey.value=name;databaseNodeSelected.value=true}}
  catch(e){showNavigationError(errorText(e))}
 }
 function contextItems():MenuItem[]{
+ if(contextMenu.kind==='table-blank'){
+  const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database;if(!p)return []
+  return ([['createTable','新建表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,action:()=>showDatabaseTool(p,db,mode)})).concat([{label:'在数据库中查找',action:()=>{nextTick(()=>{const input=document.querySelector<HTMLInputElement>('#workspace-panel-objects [aria-label="筛选对象"]');input?.focus();input?.select()})}},{label:'刷新',action:()=>void refreshTableList(p,db)}])
+ }
  if(contextMenu.kind==='table'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database,table=contextMenu.table;if(!p)return []
   return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat(contextMenu.fromObjectList?[{label:'删除表',danger:true,disabled:!selectedTables.value.length||tableToolbarDisabled.value,action:deleteToolbarTable}]:[]).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
@@ -661,7 +685,7 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelection
            <div class="object-search"><Search :size="12"/><input v-model="objectSearch" aria-label="筛选对象" placeholder="筛选"/></div>
           </div>
           <div v-if="objectsError" class="objects-error" role="alert"><AlertCircle :size="15"/>{{objectsError}}<button class="tiny-button" aria-label="关闭错误提示" @click="objectsError=''"><X :size="13"/></button></div>
-          <div ref="objectListViewport" class="object-list-scroll" :aria-busy="objectsLoading">
+          <div ref="objectListViewport" class="object-list-scroll" :aria-busy="objectsLoading" @contextmenu="contextForObjectBlank">
             <table v-if="viewMode==='details'" class="object-table" aria-label="数据库对象列表" :role="selectedDatabase&&category==='tables'?'grid':undefined" :aria-multiselectable="selectedDatabase&&category==='tables'?true:undefined"><thead><tr><th v-for="column in columns" :key="column" :title="column==='行'?'MySQL 提供的估计行数':undefined">{{column}}</th></tr></thead><tbody><tr v-for="row in workspaceRows" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" tabindex="0" :aria-selected="workspaceRowSelected(row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)"><td class="object-name"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="15" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></td><template v-if="selectedDatabase&&(category==='tables'||category==='views')"><td class="numeric">{{row.object?.autoIncrement||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td class="numeric">{{bytesText(row.object?.dataLength??'')}}</td><td>{{row.object?.engine||''}}</td><td class="numeric" title="服务器提供的估计行数">{{row.object?.rows||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selectedDatabase"><td>{{row.object?.engine||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td>{{row.object?.createdAt||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selected"><td>数据库</td></template><template v-else><td>{{row.profile?.host}}</td><td>{{row.profile?.port}}</td><td>{{row.profile?.username}}</td><td>{{envName(row.profile?.environment??'')}}</td><td>{{row.profile&&sessions[row.profile.id]?'已打开':'已关闭'}}</td></template></tr></tbody></table>
             <div v-else class="object-icon-grid"><button v-for="row in workspaceRows" :aria-pressed="workspaceRowSelected(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="28" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></button></div>
             <div v-if="objectsLoading" class="object-empty" role="status"><LoaderCircle :size="20" class="spin"/><span>正在读取{{categoryName}}…</span></div><div v-else-if="workspaceRows.length===0" class="object-empty"><span v-if="objectSearch">没有匹配的对象</span><template v-else-if="!selected"><span>{{selectedGroupID?'此组还没有连接，可新建连接或将已有连接移入此组。':'请选择左侧连接，或新建一个 MySQL 连接。'}}</span><button class="link-button" @click="create" :disabled="!!fatalError">新建连接</button></template><span v-else-if="!live">双击左侧连接以打开服务器。</span><span v-else>{{selectedDatabase?'此数据库中没有可见的'+categoryName:'没有可访问的数据库'}}</span></div>
