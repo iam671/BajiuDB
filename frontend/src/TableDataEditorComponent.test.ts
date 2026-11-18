@@ -19,6 +19,9 @@ beforeEach(()=>{
 })
 afterEach(()=>{app?.unmount();root.remove();delete window.go;vi.unstubAllGlobals()})
 async function mount(onDesign=()=>{}){app=createApp(TableDataEditor,{profile:{...defaults(),id:'qa'},database:'qa',table:'items',section:'data',active:true,connected:true,sessionKey:'qa',onDesign});app.mount(root);await settle()}
+it('separates copy, value actions and refresh in the cell context menu',async()=>{
+ await mount();root.querySelector('.table-data-grid tbody td[id]')!.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));await settle();const menu=root.querySelector('.table-cell-context')!;expect(menu).not.toBeNull();const groups:string[][]=[[]];for(const node of Array.from(menu.children)){if(node.getAttribute('role')==='separator')groups.push([]);else groups.at(-1)!.push(node.textContent!.trim())}expect(groups).toEqual([['复制','复制为'],['设置为空白字符串','设置为 NULL','生成 UUID'],['刷新']])
+})
 it('places save/add/delete first and tabs through writable new cells without writing to the server',async()=>{
  await mount();expect(Array.from(root.querySelectorAll('.table-data-toolbar>button')).slice(0,4).map(button=>button.textContent?.trim())).toEqual(['保存','新增','删除','开始事务'])
  button('新增').click();await settle();expect(document.activeElement?.getAttribute('aria-label')).toBe('id');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('first');edit('draft');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('last');await tab(true);expect(document.activeElement?.getAttribute('aria-label')).toBe('first');await tab();await tab();expect(document.activeElement).toBe(button('保存'));expect(commands.some(sql=>/^\s*(?:INSERT|UPDATE|DELETE)\b/.test(sql))).toBe(false)

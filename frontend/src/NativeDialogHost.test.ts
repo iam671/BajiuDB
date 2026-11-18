@@ -36,3 +36,9 @@ it('shows every table name in the native bulk confirmation and cancels without a
  const state:WindowDialog={id:'qa-native',kind:'confirm',title:'删除选中的 2 个表？',width:480,height:420,payload:{title:'删除选中的 2 个表？',body:'数据库 qa_db',label:'删除表',items:['alpha','odd`table']}}
  window.go!.main.App.GetWindowDialog=vi.fn(async()=>state);app=createApp(NativeDialogHost);app.mount(root);await settle();expect(Array.from(root.querySelectorAll('.confirmation-items li')).map(n=>n.textContent)).toEqual(['alpha','odd`table']);(Array.from(root.querySelectorAll('button')).find(b=>b.textContent==='取消') as HTMLButtonElement).click();await settle();expect(send).toHaveBeenLastCalledWith({id:'qa-native',action:'cancel',payload:{}})
 })
+it('preserves the structure-only preset in the native database tool and sends it to the dump backend',async()=>{
+ const admin=vi.fn(async()=>({results:[],completed:1,error:'',text:'CREATE TABLE qa(id INT);'})),save=vi.fn(async()=> 'qa.sql')
+ const state:WindowDialog={id:'qa-native',kind:'database',title:'转储 SQL 文件',width:1000,height:650,payload:{profile:{...defaults(),id:'qa'},database:'qa_db',mode:'dump',dumpIncludeData:false}}
+ Object.assign(window.go!.main.App,{GetWindowDialog:vi.fn(async()=>state),DatabaseAdmin:admin,SaveDatabaseReport:save});app=createApp(NativeDialogHost);app.mount(root);await settle();expect(root.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false)
+ Array.from(root.querySelectorAll('button')).find(b=>b.textContent?.includes('转储并保存'))!.click();await settle();expect(admin).toHaveBeenCalledWith(expect.any(String),'qa','qa_db',{operation:'dump',includeData:false});expect(save).toHaveBeenCalledWith('qa_db.sql','CREATE TABLE qa(id INT);')
+})

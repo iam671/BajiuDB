@@ -28,7 +28,7 @@ import { api, defaults, fromProfile, errorText, isDesktop, type Profile, type Co
 
 type Category = 'tables'|'views'|'functions'|'events'
 type WorkspaceRow = { key:string; name:string; kind:'connection'|'database'|Category; profile?:Profile; database?:string; object?:DatabaseObject }
-type MenuItem = {label:string; shortcut?:string; disabled?:boolean; danger?:boolean; checked?:boolean; action:()=>void|Promise<void>}
+type MenuItem = {label:string; shortcut?:string; disabled?:boolean; danger?:boolean; checked?:boolean; group?:string;children?:MenuItem[];action:()=>void|Promise<void>}
 const profiles = ref<Profile[]>([])
 const connectionGroups=ref<ConnectionGroup[]>([])
 const selectedGroupID=ref('')
@@ -86,7 +86,7 @@ const desktop = ref(isDesktop())
 const nativeWindows=hasNativeWindows()
 const menu = ref('')
 const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table'|'table-blank',database:'',connectionID:'',table:'',fromObjectList:false})
-const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string}|null>(null)
+const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string;dumpIncludeData?:boolean}|null>(null)
 type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string;dirty:boolean}|{kind:'console';dirty:boolean}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
 const activeDocument=computed(()=>workspaceTabs.value.find(tab=>tab.id===activeWorkspaceTab.value))
@@ -466,7 +466,9 @@ async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.c
 async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
 function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table'|'table-blank',fromObjectList=false){
  if(busy.value||dialogOpen.value||groupDialogOpen.value)return
- navigationError.value='';contextMenu.fromObjectList=fromObjectList;contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?(fromObjectList?300:260):kind==='table-blank'?260:230)));menu.value=''
+ navigationError.value='';contextSubmenu.value='';contextMenu.fromObjectList=fromObjectList;contextMenu.kind=kind;contextMenu.open=true;menu.value=''
+ const items=contextItems(),groups=items.filter((item,index)=>index>0&&item.group!==items[index-1]?.group).length
+ contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(items.length*28+groups*9+10)))
  nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
 }
 function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'connection')}
@@ -496,7 +498,7 @@ function closeDatabase(p:Profile,database:string,deleted=false){
  else finish()
 }
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
-function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
+function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string,dumpIncludeData?:boolean){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table,dumpIncludeData}}
 async function databaseChanged(operation:string,name:string){
  const target=databaseTool.value;if(!target)return
  if(operation==='table'){try{await refreshTableList(target.profile,target.database)}catch(e){showNavigationError(errorText(e))}return}
@@ -506,29 +508,30 @@ async function databaseChanged(operation:string,name:string){
 function contextItems():MenuItem[]{
  if(contextMenu.kind==='table-blank'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database;if(!p)return []
-  return ([['createTable','新建表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,action:()=>showDatabaseTool(p,db,mode)})).concat([{label:'在数据库中查找',action:()=>{nextTick(()=>{const input=document.querySelector<HTMLInputElement>('#workspace-panel-objects [aria-label="筛选对象"]');input?.focus();input?.select()})}},{label:'刷新',action:()=>void refreshTableList(p,db)}])
+  return ([['createTable','新建表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,group:mode==='createTable'?'structure':['import','export'].includes(mode)?'transfer':'tools',action:()=>showDatabaseTool(p,db,mode)})).concat([{label:'在数据库中查找',group:'find',action:()=>{nextTick(()=>{const input=document.querySelector<HTMLInputElement>('#workspace-panel-objects [aria-label="筛选对象"]');input?.focus();input?.select()})}},{label:'刷新',group:'refresh',action:()=>void refreshTableList(p,db)}])
  }
  if(contextMenu.kind==='table'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database,table=contextMenu.table;if(!p)return []
-  return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat(contextMenu.fromObjectList?[{label:'删除表',danger:true,disabled:!selectedTables.value.length||tableToolbarDisabled.value,action:deleteToolbarTable}]:[]).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
+  return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,group:['createTable','designTable'].includes(mode)?'structure':['import','export'].includes(mode)?'transfer':'tools',disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat(contextMenu.fromObjectList?[{label:'删除表',group:'danger',danger:true,disabled:!selectedTables.value.length||tableToolbarDisabled.value,action:deleteToolbarTable}]:[]).concat([{label:'刷新',group:'refresh',action:()=>void refreshTableList(p,db)}])
  }
 
  if(contextMenu.kind==='database'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),database=contextMenu.database;if(!p)return []
-  return [{label:databaseIsOpen(p.id,database)?'关闭数据库':'打开数据库',action:()=>{if(databaseIsOpen(p.id,database))closeDatabase(p,database);else void selectDatabase(p,database)}},...([['alter','编辑数据库'],['create','新建数据库'],['drop','删除数据库'],['query','新建查询'],['console','命令行界面'],['run','运行SQL文件'],['dump','转储SQL文件'],['dictionary','数据字典'],['model','逆向数据库到模型']] as [DatabaseToolMode,string][]).map(([mode,label])=>({label,danger:mode==='drop',action:()=>showDatabaseTool(p,database,mode)})),{label:'刷新',action:async()=>{try{sessions[p.id]=await api.RefreshDatabases(p.id);if(databaseIsOpen(p.id,database)){await selectDatabase(p,database);await loadObjects()}}catch(e){showNavigationError(errorText(e))}}}]
+  return [{label:databaseIsOpen(p.id,database)?'关闭数据库':'打开数据库',group:'session',action:()=>{if(databaseIsOpen(p.id,database))closeDatabase(p,database);else void selectDatabase(p,database)}},...([['alter','编辑数据库'],['create','新建数据库'],['drop','删除数据库'],['query','新建查询'],['console','命令行界面'],['run','运行SQL文件'],['dump','转储SQL文件'],['dictionary','数据字典'],['model','逆向数据库到模型']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,group:['alter','create','drop'].includes(mode)?'schema':mode==='query'?'query':'tools',danger:mode==='drop',children:mode==='dump'?[{label:'结构和数据...',action:()=>showDatabaseTool(p,database,'dump',undefined,true)},{label:'仅结构...',action:()=>showDatabaseTool(p,database,'dump',undefined,false)}]:undefined,action:()=>showDatabaseTool(p,database,mode)})),{label:'刷新',group:'refresh',action:async()=>{try{sessions[p.id]=await api.RefreshDatabases(p.id);if(databaseIsOpen(p.id,database)){await selectDatabase(p,database);await loadObjects()}}catch(e){showNavigationError(errorText(e))}}}]
  }
- if(contextMenu.kind==='connection')return [...connectionMenu().slice(0,3),{label:'移至分组…',disabled:!selected.value||!!busy.value||(!connectionGroups.value.length&&!selected.value.groupId),action:showGroupDialog},...connectionMenu().slice(3)]
- const items:MenuItem[]=[{label:'新建连接…',disabled:!!busy.value||!!fatalError.value,action:create}]
- if(contextMenu.kind==='root')items.push({label:'新建组',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit()})
- else items.push({label:'重命名组',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit(selectedConnectionGroup.value)},{label:'删除组',disabled:!!busy.value||!!fatalError.value,danger:true,action:removeGroup})
- items.push({label:'关闭所有连接',disabled:!!busy.value||!Object.keys(sessions).length,action:disconnectAll})
+ if(contextMenu.kind==='connection')return [...connectionMenu().slice(0,3),{label:'移至分组…',group:'group',disabled:!selected.value||!!busy.value||(!connectionGroups.value.length&&!selected.value.groupId),action:showGroupDialog},...connectionMenu().slice(3)]
+ const items:MenuItem[]=[{label:'新建连接…',group:'create',disabled:!!busy.value||!!fatalError.value,action:create}]
+ if(contextMenu.kind==='root')items.push({label:'新建组',group:'create',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit()})
+ else items.push({label:'重命名组',group:'manage',disabled:!!busy.value||!!fatalError.value,action:()=>beginGroupEdit(selectedConnectionGroup.value)},{label:'删除组',group:'danger',disabled:!!busy.value||!!fatalError.value,danger:true,action:removeGroup})
+ items.push({label:'关闭所有连接',group:'session',disabled:!!busy.value||!Object.keys(sessions).length,action:disconnectAll})
  return items
 }
-const contextMenuRef=ref<HTMLElement>()
+const contextMenuRef=ref<HTMLElement>(),contextSubmenu=ref(''),contextSubmenuStyle=ref<Record<string,string>>({})
+const contextMenuItems=computed(contextItems)
 useMenuDismissal(()=>contextMenu.open?contextMenuRef.value:undefined,closeMenus)
-function closeMenus(){menu.value='';contextMenu.open=false}
+function closeMenus(){menu.value='';contextMenu.open=false;contextSubmenu.value=''}
 function showMenu(name:string){contextMenu.open=false;menu.value=menu.value===name?'':name;nextTick(()=>document.querySelector<HTMLButtonElement>('.menu-popup button:not(:disabled)')?.focus())}
-function connectionMenu():MenuItem[]{return [{label:live.value?'关闭连接':'打开连接',shortcut:live.value?'':'Enter',disabled:!selected.value||!!busy.value,action:live.value?disconnect:()=>openConnection()},{label:'编辑连接…',disabled:!selected.value||!!busy.value,action:edit},{label:'复制连接…',disabled:!selected.value||!!busy.value,action:duplicate},{label:'删除连接',disabled:!selected.value||!!busy.value,danger:true,action:remove}]}
+function connectionMenu():MenuItem[]{return [{label:live.value?'关闭连接':'打开连接',shortcut:live.value?'':'Enter',group:'session',disabled:!selected.value||!!busy.value,action:live.value?disconnect:()=>openConnection()},{label:'编辑连接…',group:'config',disabled:!selected.value||!!busy.value,action:edit},{label:'复制连接…',group:'config',disabled:!selected.value||!!busy.value,action:duplicate},{label:'删除连接',group:'danger',disabled:!selected.value||!!busy.value,danger:true,action:remove}]}
 function itemsFor(name:string):MenuItem[]{
   if(name==='file')return [{label:'新建 MySQL 连接…',shortcut:'Ctrl+N',disabled:!!busy.value||!!fatalError.value,action:create},...connectionMenu(),{label:'退出',action:requestQuit}]
   if(name==='view')return [{label:'刷新',shortcut:'F5',disabled:!live.value||!!busy.value,action:refresh},{label:'导航窗格',checked:showSidebar.value,action:()=>{showSidebar.value=!showSidebar.value}},{label:'信息窗格',checked:showInformation.value,action:()=>{showInformation.value=!showInformation.value}},{label:'详细信息',checked:viewMode.value==='details',action:()=>{viewMode.value='details'}},{label:'图标',checked:viewMode.value==='icons',action:()=>{viewMode.value='icons'}}]
@@ -538,6 +541,20 @@ function itemsFor(name:string):MenuItem[]{
 }
 function invoke(item:MenuItem){if(item.disabled)return;closeMenus();void item.action()}
 function menuKeys(e:KeyboardEvent){if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const nodes=Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const i=nodes.indexOf(document.activeElement as HTMLButtonElement);nodes[e.key==='Home'?0:e.key==='End'?nodes.length-1:(i+(e.key==='ArrowDown'?1:nodes.length-1))%nodes.length]?.focus()}
+function openContextSubmenu(item:MenuItem,button:HTMLElement,focus=false){
+ if(item.disabled||!item.children)return
+ const box=button.getBoundingClientRect(),width=185,height=item.children.length*28+10
+ contextSubmenuStyle.value={left:Math.max(4,box.right+width>window.innerWidth?box.left-width+2:box.right-2)+'px',top:Math.max(4,Math.min(box.top,window.innerHeight-height-4))+'px'};contextSubmenu.value=item.label
+ if(focus)void nextTick(()=>contextMenuRef.value?.querySelector<HTMLButtonElement>('.context-submenu button:not(:disabled)')?.focus())
+}
+function contextKeys(event:KeyboardEvent){
+ const target=event.target as Element,sub=target.closest<HTMLElement>('.context-submenu'),parent=contextMenuRef.value?.querySelector<HTMLButtonElement>('[data-context-submenu]')
+ if((event.key==='Escape'&&contextSubmenu.value)||(event.key==='ArrowLeft'&&sub)){event.preventDefault();event.stopPropagation();contextSubmenu.value='';parent?.focus();return}
+ if(event.key==='ArrowRight'&&target.hasAttribute('data-context-submenu')){event.preventDefault();event.stopPropagation();const item=contextMenuItems.value.find(item=>item.label===target.getAttribute('data-context-submenu'));if(item)openContextSubmenu(item,target as HTMLElement,true);return}
+ if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return
+ event.preventDefault();event.stopPropagation();const nodes=Array.from((sub??contextMenuRef.value)?.querySelectorAll<HTMLButtonElement>(sub?'button:not(:disabled)':'[data-context-main]:not(:disabled)')??[]),index=nodes.indexOf(document.activeElement as HTMLButtonElement)
+ if(!sub)contextSubmenu.value='';nodes[event.key==='Home'?0:event.key==='End'?nodes.length-1:(index+(event.key==='ArrowDown'?1:nodes.length-1))%nodes.length]?.focus()
+}
 function treeKeys(e:KeyboardEvent){if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;e.preventDefault();const nodes=Array.from(document.querySelectorAll<HTMLElement>('[data-tree-row]'));const i=nodes.indexOf(e.currentTarget as HTMLElement);nodes[e.key==='Home'?0:e.key==='End'?nodes.length-1:(i+(e.key==='ArrowDown'?1:nodes.length-1))%nodes.length]?.focus()}
 function visibleDatabases(p:Profile){const dbs=sessions[p.id]?.databases??[];const term=search.value.toLowerCase();return !term||`${p.name} ${p.host}`.toLowerCase().includes(term)?dbs:dbs.filter(db=>db.toLowerCase().includes(term))}
 function connectionHasDatabases(id:string){return (sessions[id]?.databases.length??0)>0}
@@ -571,7 +588,7 @@ const nativeDialogDefinitions=computed(()=>{
  const windows=[]
  if(dialogOpen.value)windows.push({key:'connection',kind:'connection' as const,title:'MySQL - '+(connectOnSave.value?'打开连接':editingID.value?'编辑连接':'新建连接'),width:580,height:580,payload:{model:form,clientVersion:connectionClientVersion.value,busy:busy.value,errors,result:testResult.value,error:testError.value,editing:!!editingID.value,connectOnSave:connectOnSave.value,fatal:!!fatalError.value,groups:connectionGroups.value}})
  if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
- if(databaseTool.value){const{profile,database,mode,table,initialSQL}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL}})}
+ if(databaseTool.value){const{profile,database,mode,table,initialSQL,dumpIncludeData}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL,dumpIncludeData}})}
  if(about.value)windows.push({key:'about',kind:'about' as const,title:'关于 Bajiu DB · 捌玖',width:365,height:310,payload:{}})
  if(cellValuePicker.value){const{apply,...payload}=cellValuePicker.value;windows.push({key:'cell-value',kind:'cell-value' as const,title:'编辑 '+payload.column.name,width:['json','text','binary'].includes(quickKind(payload.column))?620:380,height:quickKind(payload.column)==='datetime'?510:quickKind(payload.column)==='date'?460:440,payload})}
  if(indexFieldsPicker.value){const{apply,...payload}=indexFieldsPicker.value;windows.push({key:'index-fields',kind:'index-fields' as const,title:'选择索引字段',width:480,height:440,payload})}
@@ -703,10 +720,10 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelection
       </div>
       <footer class="application-statusbar"><span>{{activeDocument?activeDocument.title:selectedTables.length?'已选择 '+selectedTables.length+' 个表':selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span v-if="activeDocument" class="status-context"><Plug :size="12"/>{{activeDocument.profile.name}}<Database :size="12"/>{{activeDocument.database}}</span><span class="status-context" v-else-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div v-show="activeWorkspaceTab==='objects'" class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
-    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" @close="closeDatabaseTool" @changed="databaseChanged"/>
+    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" :dumpIncludeData="databaseTool.dumpIncludeData" @close="closeDatabaseTool" @changed="databaseChanged"/>
     <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
     <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
-    <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>
+    <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="contextKeys"><template v-for="(item,index) in contextMenuItems" :key="item.label"><div v-if="index>0&&item.group!==contextMenuItems[index-1]?.group" class="context-menu-separator" role="separator"></div><div v-if="item.children" class="context-submenu-group" @mouseleave="contextSubmenu=''"><button data-context-main :data-context-submenu="item.label" role="menuitem" aria-haspopup="menu" :aria-expanded="contextSubmenu===item.label" :disabled="item.disabled" @mouseenter="openContextSubmenu(item,$event.currentTarget as HTMLElement)" @click="openContextSubmenu(item,$event.currentTarget as HTMLElement,true)">{{item.label}}<ChevronRight :size="12"/></button><div v-if="contextSubmenu===item.label" class="context-submenu menu-popup" role="menu" :aria-label="item.label" :style="contextSubmenuStyle"><button v-for="child in item.children" :key="child.label" role="menuitem" :disabled="child.disabled" @click="invoke(child)">{{child.label}}</button></div></div><button v-else data-context-main role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @mouseenter="contextSubmenu=''" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></template></div>
     <ConfirmationDialog v-if="!nativeWindows&&confirm.open" :title="confirm.title" :body="confirm.body" :label="confirm.label" :items="confirm.items" @cancel="cancelConfirm" @accept="acceptConfirm"/>
     <ConfirmationDialog v-if="!nativeWindows&&detailDialog" v-bind="detailDialog" label="关闭" notice @cancel="detailDialog=undefined" @accept="detailDialog=undefined"/>
     <CellValueDialog v-if="!nativeWindows&&cellValuePicker" v-bind="cellValuePicker" @apply="applyCellValue" @cancel="cellValuePicker=undefined"/>

@@ -8,10 +8,10 @@ import {quoteIdentifier} from './tableData'
 import SearchableSelect from './SearchableSelect.vue'
 import TableWorkflows from './TableWorkflows.vue'
 export type DatabaseToolMode='create'|'alter'|'drop'|'query'|'console'|'run'|'dump'|'dictionary'|'model'|'createTable'|'import'|'export'|'generate'|'openTable'|'designTable'
-const props=defineProps<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string}>()
+const props=defineProps<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string;dumpIncludeData?:boolean}>()
 const emit=defineEmits<{close:[];changed:[operation:string,name:string]}>()
 const names:Record<DatabaseToolMode,string>={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'}
-const running=ref(false),error=ref(''),message=ref(''),sql=ref(props.initialSQL??''),file=ref(''),statements=ref(0),includeData=ref(true),name=ref(props.mode==='create'?'':props.database),confirmName=ref(''),charset=ref('utf8mb4'),collation=ref(''),catalog=ref<(string|null)[][]>([]),result=ref<AdminResult|null>(null),svg=ref(''),zoom=ref(1),editor=ref<HTMLTextAreaElement>(),windowRef=ref<HTMLElement>()
+const running=ref(false),error=ref(''),message=ref(''),sql=ref(props.initialSQL??''),file=ref(''),statements=ref(0),includeData=ref(props.dumpIncludeData??true),name=ref(props.mode==='create'?'':props.database),confirmName=ref(''),charset=ref('utf8mb4'),collation=ref(''),catalog=ref<(string|null)[][]>([]),result=ref<AdminResult|null>(null),svg=ref(''),zoom=ref(1),editor=ref<HTMLTextAreaElement>(),windowRef=ref<HTMLElement>()
 const workflow=ref<InstanceType<typeof TableWorkflows>>()
 const workflowMode=computed(()=>['createTable','import','export','generate'].includes(props.mode)?props.mode as 'createTable'|'import'|'export'|'generate':null)
 const currentTableDDL=ref(''),alterClause=ref('')
