@@ -43,6 +43,8 @@ const selectedDatabase = ref('')
 const databaseNodeSelected = ref(false)
 const category = ref<Category>('tables')
 const selectedRowKey = ref('')
+const selectedTableKeys=ref(new Set<string>()),tableSelectionAnchor=ref('')
+function clearTableSelection(){selectedTableKeys.value=new Set();tableSelectionAnchor.value=''}
 const objects = ref<DatabaseObject[]>([])
 const objectsLoading = ref(false)
 const objectsError = ref('')
@@ -82,7 +84,7 @@ const configPath = ref('')
 const desktop = ref(isDesktop())
 const nativeWindows=hasNativeWindows()
 const menu = ref('')
-const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:''})
+const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table',database:'',connectionID:'',table:'',fromObjectList:false})
 const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string}|null>(null)
 type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string;dirty:boolean}|{kind:'console';dirty:boolean}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
@@ -131,7 +133,7 @@ const dialogRef = ref<InstanceType<typeof ConnectionDialog>|null>(null)
 const errors = reactive<Record<string,string>>({})
 const testResult = ref<TestResult|null>(null)
 const testError = ref('')
-const confirm = reactive({open:false,title:'',body:'',label:'',danger:false,exit:false,action:null as null|(()=>void|Promise<void>)})
+const confirm = reactive({open:false,title:'',body:'',label:'',items:[] as string[],danger:false,exit:false,action:null as null|(()=>void|Promise<void>)})
 const about = ref(false)
 const detailDialog=ref<DialogDetails>()
 const cellValuePicker=ref<CellValueRequest>()
@@ -173,20 +175,32 @@ const workspaceRows = computed<WorkspaceRow[]>(()=>{
   return term?rows.filter(row=>`${row.name} ${row.object?.comment??''}`.toLowerCase().includes(term)):rows
 })
 const selectedRow = computed(()=>workspaceRows.value.find(r=>r.key===selectedRowKey.value))
+const selectedTables=computed(()=>workspaceRows.value.filter(row=>row.kind==='tables'&&selectedTableKeys.value.has(row.key)))
+function workspaceRowSelected(row:WorkspaceRow){return row.kind==='tables'?selectedTableKeys.value.has(row.key):row.key===selectedRowKey.value}
 const selectedObject = computed(()=>selectedRow.value?.object)
 const tableToolbarVisible=computed(()=>!!toolDatabase.value)
-const toolbarTable=computed(()=>selectedObject.value?.kind==='tables'?selectedObject.value.name:'')
+const toolbarTable=computed(()=>selectedTables.value.length===1?selectedTables.value[0]!.name:'')
 const tableToolbarDisabled=computed(()=>!live.value||!toolDatabase.value||!!busy.value||objectsLoading.value)
 function openTableTool(mode:DatabaseToolMode){const p=selected.value,db=toolDatabase.value;if(!p||!db||tableToolbarDisabled.value)return;if((mode==='openTable'||mode==='designTable')&&!toolbarTable.value)return;showDatabaseTool(p,db,mode,toolbarTable.value||undefined)}
 function deleteToolbarTable(){
- const p=selected.value,db=toolDatabase.value,table=toolbarTable.value
- if(!p||!db||!table||tableToolbarDisabled.value)return
- ask('删除表“'+table+'”？','将永久删除数据库“'+db+'”中的表“'+table+'”及其全部数据，此操作无法撤销。','删除表',async()=>{
+ const p=selected.value,db=selectedDatabase.value,names=selectedTables.value.map(row=>row.name),session=p?sessions[p.id]?.connectedAt:undefined
+ if(!p||!db||!names.length||tableToolbarDisabled.value)return
+ const title=names.length===1?'删除表“'+names[0]+'”？':'删除选中的 '+names.length+' 个表？',body='将永久删除数据库“'+db+'”中以下 '+names.length+' 个表及其全部数据，此操作无法撤销。'
+ if(new TextEncoder().encode(JSON.stringify({title,body,items:names})).length>800000){showNavigationError('选中的表过多，请分批删除。');return}
+ ask(title,body,'删除表',async()=>{
+  if(sessions[p.id]?.connectedAt!==session){showNavigationError('连接已变化，请重新选择要删除的表。');return}
   busy.value='drop-table'
-  try{const result=await api.DatabaseAdmin(crypto.randomUUID(),p.id,db,{operation:'query',sql:'DROP TABLE '+quoteIdentifier(db)+'.'+quoteIdentifier(table)+';'});if(result.error)throw new Error(result.error);busy.value='';await refreshTableList(p,db)}catch(e){showNavigationError(errorText(e))}finally{busy.value=''}
- },true)
+  let failure=''
+  try{const result=await api.DatabaseAdmin(crypto.randomUUID(),p.id,db,{operation:'query',sql:'DROP TABLE '+names.map(name=>quoteIdentifier(db)+'.'+quoteIdentifier(name)).join(', ')+';'});if(result.error||result.completed!==1)throw new Error(result.error||'服务器未确认删除结果')}catch(e){failure='删除未完成或结果未确认：'+errorText(e)+'。部分表可能已删除，请核对刷新后的列表。'}
+  try{
+   if(selectedID.value===p.id&&selectedDatabase.value===db&&category.value==='tables'){await loadObjects();if(objectsError.value)throw new Error(objectsError.value)}
+   else{const result=await api.ListObjects(p.id,db,'tables');treeObjects[treeKey(p.id,db,'tables')]=result.objects}
+   const existing=new Set((treeObjects[treeKey(p.id,db,'tables')]??[]).map(table=>table.name));for(const key of expandedTables){const parts=JSON.parse(key);if(parts[0]===p.id&&parts[1]===db&&!existing.has(parts[2]))expandedTables.delete(key)}
+  }catch(e){failure+=(failure?'\n':'')+'表列表刷新失败，请手动刷新核对：'+errorText(e)}finally{busy.value=''}
+  if(failure)showNavigationError(failure)
+ },true,names)
 }
-const canShowDDL=computed(()=>selectedObject.value?.kind==='tables')
+const canShowDDL=computed(()=>selectedObject.value?.kind==='tables'&&selectedTables.value.length===1)
 const informationName = computed(()=>selectedObject.value?.name??selectedRow.value?.name??selectedDatabase.value??'')
 const scopeName = computed(()=>selectedDatabase.value?categoryName.value:selected.value?'数据库':'连接')
 const columns = computed(()=>selectedDatabase.value
@@ -201,7 +215,7 @@ function showNavigationError(text:string){navigationError.value=text}
 function clearFeedback(){testResult.value=null;testError.value='';for(const key of Object.keys(errors))delete errors[key]}
 function requestInput(){const {createdAt:_,updatedAt:__,hasPassword:___,...input}=form;return {...input,port:Number(form.port),timeout:Number(form.timeout)}}
 function connectionInput(p:Profile){const input=fromProfile(p);if(transientPasswords.has(p.id))Object.assign(input,transientPasswords.get(p.id),{passwordAction:'replace',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace'});const {createdAt:_,updatedAt:__,hasPassword:___,...request}=input;return request}
-function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false){Object.assign(confirm,{open:true,title,body,label,action,danger,exit:false});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
+function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false,items:string[]=[]){Object.assign(confirm,{open:true,title,body,label,action,danger,exit:false,items});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
 function requestQuit(){
  if(confirm.open&&confirm.exit)return
  const pending=workspaceTabs.value.some(tab=>tab.dirty)||(dialogOpen.value&&dirty.value)||!!indexFieldsPicker.value||!!tableNamePrompt.value||!!cellValuePicker.value||(groupEditor.active&&!!groupEditor.name.trim())
@@ -209,7 +223,7 @@ function requestQuit(){
  if(pending){ask('退出并放弃未保存的修改？','当前有未保存内容、正在进行的查询或未提交事务。退出将放弃草稿并结束连接，已提交操作不会回滚。','放弃修改并退出',quit,true);confirm.exit=true}else void quit().catch(e=>showNavigationError(errorText(e)))
 }
 async function acceptConfirm(){const action=confirm.action;confirm.open=false;confirm.action=null;await action?.()}
-function cancelConfirm(){confirm.open=false;nextTick(()=>{if(dialogOpen.value)document.getElementById('connection-name')?.focus();else(document.querySelector('[data-tree-row]') as HTMLElement|null)?.focus()})}
+function cancelConfirm(){confirm.open=false;confirm.action=null;nextTick(()=>{if(dialogOpen.value)document.getElementById('connection-name')?.focus();else(document.querySelector('[data-tree-row]') as HTMLElement|null)?.focus()})}
 function focusReturn(){nextTick(()=>{if(returnFocus?.isConnected)returnFocus.focus();else(document.querySelector<HTMLElement>('.tree-connection.selected')??document.querySelector<HTMLElement>('.tree-group.selected')??document.querySelector<HTMLElement>('.tree-root'))?.focus()})}
 function closeDialog(){dialogOpen.value=false;clearFeedback();Object.assign(form,defaults());baseline.value=JSON.stringify(form);focusReturn()}
 function cancelDialog(){if(busy.value)return;if(dirty.value)ask('放弃未保存的修改？','此连接的修改尚未保存。是否放弃这些修改并关闭窗口？','放弃修改',closeDialog,true);else closeDialog()}
@@ -228,7 +242,7 @@ function edit(){if(selected.value)openDialog(selected.value)}
 function duplicate(){const p=selected.value;if(!p)return;openDialog();Object.assign(form,{...p,id:'',revision:0,name:p.name+' 副本',hasPassword:false,password:'',passwordAction:'replace',rememberPassword:true,createdAt:'',updatedAt:''});}
 function validate(requireName=true){for(const key of Object.keys(errors))delete errors[key];if(requireName&&!form.name.trim())errors.name='请输入连接名';if(!form.host.trim())errors.host='请输入主机地址';if(!Number.isInteger(Number(form.port))||form.port<1||form.port>65535)errors.port='端口范围为 1–65535';if(!form.username.trim())errors.username='请输入用户名';if(Object.keys(errors).length){dialogRef.value?.showValidation();return false}return true}
 function clearDDL(resetTab=true){ddlRequest++;if(resetTab)informationTab.value='info';ddlText.value='';ddlError.value='';ddlLoading.value=false;ddlCopied.value=false;ddlCopying.value=false;ddlCopyError.value=''}
-function invalidateObjects(){objectRequest++;objects.value=[];objectsError.value='';objectsLoading.value=false;selectedRowKey.value='';truncated.value=false;clearDDL()}
+function invalidateObjects(){objectRequest++;objects.value=[];objectsError.value='';objectsLoading.value=false;selectedRowKey.value='';clearTableSelection();truncated.value=false;clearDDL()}
 function clearDatabaseState(id:string){clearTree(id);for(const state of [openedDatabases,expandedDatabases])for(const key of state)if(key.startsWith(id+'/'))state.delete(key)}
 function databaseIsOpen(id:string,database:string){return !!sessions[id]&&openedDatabases.has(id+'/'+database)}
 function databaseIconClass(id:string,database:string){return databaseIsOpen(id,database)?'database-icon database-open':'database-icon'}
@@ -368,7 +382,7 @@ async function selectDatabase(p:Profile,database:string,kind:Category='tables',e
   if(busy.value||dialogOpen.value||!sessions[p.id])return
   if(activateObjects)activeWorkspaceTab.value='objects'
   const sameScope=selectedID.value===p.id&&selectedDatabase.value===database&&category.value===kind
-  selectedID.value=p.id;selectedGroupID.value=p.groupId??'';selectedDatabase.value=database;databaseNodeSelected.value=false;category.value=kind;objectSearch.value='';expandedConnections.add(p.id);selectedRowKey.value='';clearDDL()
+  selectedID.value=p.id;selectedGroupID.value=p.groupId??'';selectedDatabase.value=database;databaseNodeSelected.value=false;category.value=kind;objectSearch.value='';expandedConnections.add(p.id);selectedRowKey.value='';clearTableSelection();clearDDL()
   if(expand)expandedDatabases.add(p.id+'/'+database)
   if(sameScope&&(objectsLoading.value||(!objectsError.value&&databaseIsOpen(p.id,database))))return
   await loadObjects()
@@ -382,7 +396,7 @@ function selectDatabaseInfo(p:Profile,database:string){
 async function loadObjects(){
   const id=selectedID.value,database=selectedDatabase.value,kind=category.value
   if(!id||!database||!sessions[id])return
-  const request=++objectRequest;objectsLoading.value=true;objectsError.value='';objects.value=[];truncated.value=false;selectedRowKey.value='';clearDDL()
+  const request=++objectRequest;objectsLoading.value=true;objectsError.value='';objects.value=[];truncated.value=false;selectedRowKey.value='';clearTableSelection();clearDDL()
   try{const result=await api.ListObjects(id,database,kind);if(request===objectRequest){objects.value=result.objects??[];treeObjects[treeKey(id,database,kind)]=objects.value;truncated.value=result.truncated;openedDatabases.add(id+'/'+database)}}
   catch(e){if(request===objectRequest)objectsError.value=errorText(e)}
   finally{if(request===objectRequest)objectsLoading.value=false}
@@ -396,12 +410,26 @@ function toggleDatabase(p:Profile,database:string){
   if(expandedDatabases.has(key))expandedDatabases.delete(key);else expandedDatabases.add(key)
 }
 async function refresh(){if(busy.value||!live.value)return;if(selectedDatabase.value){await loadObjects();return}busy.value='refresh';try{sessions[selectedID.value]=await api.RefreshDatabases(selectedID.value);objectsError.value=''}catch(e){delete sessions[selectedID.value];clearDatabaseState(selectedID.value);expandedConnections.delete(selectedID.value);invalidateObjects();objectsError.value=errorText(e)}finally{busy.value=''}}
-function selectWorkspaceRow(row:WorkspaceRow){
-  if(selectedRowKey.value===row.key)return
-  const keepDDL=informationTab.value==='ddl'&&row.object?.kind==='tables'
-  selectedRowKey.value=row.key;clearDDL(!keepDDL)
-  if(keepDDL)void showDDL()
+function focusWorkspaceRow(row?:WorkspaceRow){
+ const key=row?.key??'',keepDDL=informationTab.value==='ddl'&&row?.object?.kind==='tables'&&selectedTables.value.length===1
+ if(selectedRowKey.value!==key||informationTab.value==='ddl'&&!keepDDL){selectedRowKey.value=key;clearDDL(!keepDDL)}
+ if(keepDDL&&!ddlText.value&&!ddlLoading.value)void showDDL()
 }
+function selectWorkspaceRow(row:WorkspaceRow,event?:MouseEvent|KeyboardEvent){
+ if(busy.value||objectsLoading.value)return
+ if(row.kind!=='tables'||!selectedDatabase.value){clearTableSelection();focusWorkspaceRow(row);return}
+ const rows=workspaceRows.value.filter(item=>item.kind==='tables'),toggle=!!(event?.ctrlKey||event?.metaKey)
+ let keys=toggle?new Set(selectedTableKeys.value):new Set<string>()
+ if(event?.shiftKey){const anchor=rows.findIndex(item=>item.key===tableSelectionAnchor.value),target=rows.findIndex(item=>item.key===row.key);if(anchor>=0&&target>=0){for(const item of rows.slice(Math.min(anchor,target),Math.max(anchor,target)+1))keys.add(item.key)}else{keys.add(row.key);tableSelectionAnchor.value=row.key}}
+ else{if(toggle&&keys.has(row.key))keys.delete(row.key);else keys.add(row.key);tableSelectionAnchor.value=row.key}
+ selectedTableKeys.value=keys;focusWorkspaceRow(keys.has(row.key)?row:rows.find(item=>keys.has(item.key)))
+}
+function objectListKeys(event:KeyboardEvent,row:WorkspaceRow){
+ if(row.kind!=='tables'||!selectedDatabase.value||busy.value||objectsLoading.value)return
+ if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();event.stopPropagation();selectedTableKeys.value=new Set(workspaceRows.value.filter(item=>item.kind==='tables').map(item=>item.key));tableSelectionAnchor.value=row.key;focusWorkspaceRow(row)}
+ else if(event.key==='Delete'){event.preventDefault();event.stopPropagation();deleteToolbarTable()}
+}
+watch([selectedID,selectedDatabase,category,objectSearch],()=>{clearTableSelection();selectedRowKey.value='';clearDDL()},{flush:'sync'})
 async function showDDL(){
  if(!canShowDDL.value||!selectedObject.value)return
  informationTab.value='ddl';if(ddlLoading.value||ddlText.value)return
@@ -422,16 +450,16 @@ function passwordChanged(){form.passwordAction='replace';clearFeedback()}
 function forgetPassword(){form.password='';form.sshPassword='';form.sshKeyPassphrase='';form.httpToken='';form.passwordAction='forget';form.sshPasswordAction='replace';form.sshKeyPassphraseAction='replace';form.httpTokenAction='replace';form.rememberPassword=false;form.hasPassword=false}
 async function chooseCA(){try{const path=await api.SelectCAFile();if(path)form.caPath=path}catch(e){testError.value=errorText(e)}}
 async function chooseSSHKey(){try{const path=await api.SelectSSHKey();if(path)form.sshKeyPath=path}catch(error){testError.value=errorText(error)}}
-function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table'){
+function showContext(e:MouseEvent,kind:'root'|'group'|'connection'|'database'|'table',fromObjectList=false){
  if(busy.value||dialogOpen.value||groupDialogOpen.value)return
- navigationError.value='';contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?260:230)));menu.value=''
+ navigationError.value='';contextMenu.fromObjectList=fromObjectList;contextMenu.kind=kind;contextMenu.open=true;contextMenu.x=Math.max(0,Math.min(e.clientX,window.innerWidth-225));contextMenu.y=Math.max(0,Math.min(e.clientY,window.innerHeight-(kind==='database'?330:kind==='table'?(fromObjectList?300:260):230)));menu.value=''
  nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-context-menu button:not(:disabled)')?.focus())
 }
 function contextFor(e:MouseEvent,p:Profile){selectProfile(p);showContext(e,'connection')}
 function contextForRoot(e:MouseEvent){selectRoot();showContext(e,'root')}
 function contextForGroup(e:MouseEvent,id:string){selectConnectionGroup(id);showContext(e,'group')}
 function contextForDatabase(e:MouseEvent,p:Profile,database:string){selectDatabaseInfo(p,database);contextMenu.database=database;contextMenu.connectionID=p.id;showContext(e,'database')}
-function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.object?.kind==='tables'&&selected.value){void contextForTable(e,selected.value,selectedDatabase.value,row.object);return}if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
+function contextForWorkspaceRow(e:MouseEvent,row:WorkspaceRow){if(row.object?.kind==='tables'&&selected.value){if(!workspaceRowSelected(row))selectWorkspaceRow(row);contextMenu.table=row.name;contextMenu.database=selectedDatabase.value;contextMenu.connectionID=selected.value.id;showContext(e,'table',true);return}if(row.database&&selected.value)contextForDatabase(e,selected.value,row.database)}
 function closeDatabase(p:Profile,database:string){clearTree(p.id,database);openedDatabases.delete(p.id+'/'+database);expandedDatabases.delete(p.id+'/'+database);if(selectedID.value===p.id&&selectedDatabase.value===database){selectProfile(p);selectedRowKey.value=database;databaseNodeSelected.value=true}}
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
 function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
@@ -444,7 +472,7 @@ async function databaseChanged(operation:string,name:string){
 function contextItems():MenuItem[]{
  if(contextMenu.kind==='table'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),db=contextMenu.database,table=contextMenu.table;if(!p)return []
-  return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
+  return ([['createTable','新建表'],['designTable','设计表'],['import','导入向导'],['export','导出向导'],['dictionary','数据字典'],['generate','数据生成'],['run','运行SQL文件...'],['query','在数据库中查询']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,disabled:mode==='designTable'&&!table,action:()=>showDatabaseTool(p,db,mode,table)})).concat(contextMenu.fromObjectList?[{label:'删除表',danger:true,disabled:!selectedTables.value.length||tableToolbarDisabled.value,action:deleteToolbarTable}]:[]).concat([{label:'刷新',action:()=>void refreshTableList(p,db)}])
  }
 
  if(contextMenu.kind==='database'){
@@ -481,7 +509,7 @@ function resizeKeys(e:KeyboardEvent,side:'left'|'right'){if(e.key!=='ArrowLeft'&
 async function copyText(value:string){try{await navigator.clipboard.writeText(value);}catch{showNavigationError('无法访问剪贴板')}}
 function shortcuts(e:KeyboardEvent){
   if(databaseTool.value)return
-  if(e.key==='Escape'){e.preventDefault();if(cellValuePicker.value){cellValuePicker.value=undefined}else if(indexFieldsPicker.value){indexFieldsPicker.value=undefined}else if(tableNamePrompt.value){tableNamePrompt.value=undefined}else if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
+  if(e.key==='Escape'){e.preventDefault();if(cellValuePicker.value){cellValuePicker.value=undefined}else if(indexFieldsPicker.value){indexFieldsPicker.value=undefined}else if(tableNamePrompt.value){tableNamePrompt.value=undefined}else if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;confirm.action=null;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
   if(groupDialogOpen.value)return
   if(cellValuePicker.value||indexFieldsPicker.value||tableNamePrompt.value||detailDialog.value||confirm.open||about.value)return
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&dialogOpen.value){e.preventDefault();void saveDialog();return}
@@ -510,7 +538,7 @@ const nativeDialogDefinitions=computed(()=>{
  if(indexFieldsPicker.value){const{apply,...payload}=indexFieldsPicker.value;windows.push({key:'index-fields',kind:'index-fields' as const,title:'选择索引字段',width:480,height:440,payload})}
  if(tableNamePrompt.value)windows.push({key:'table-name',kind:'confirm' as const,title:'保存新建表',width:420,height:220,payload:{namePrompt:true,value:tableNamePrompt.value.value}})
  if(detailDialog.value)windows.push({key:'details',kind:'confirm' as const,title:detailDialog.value.title,width:760,height:520,payload:{...detailDialog.value,label:'关闭',notice:true}})
- if(confirm.open)windows.push({key:'confirm',kind:'confirm' as const,title:confirm.title,width:440,height:240,payload:{title:confirm.title,body:confirm.body,label:confirm.label}})
+ if(confirm.open)windows.push({key:'confirm',kind:'confirm' as const,title:confirm.title,width:confirm.items.length?480:440,height:confirm.items.length?420:240,payload:{title:confirm.title,body:confirm.body,label:confirm.label,items:confirm.items}})
  return windows
 })
 function nativeDialogAction(key:string,event:DialogAction){
@@ -610,7 +638,7 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
             <button @click="openTableTool('openTable')" :disabled="tableToolbarDisabled||!toolbarTable"><Table2 :size="14"/>打开表</button>
             <button @click="openTableTool('designTable')" :disabled="tableToolbarDisabled||!toolbarTable"><Pencil :size="13"/>设计表</button>
             <button @click="openTableTool('createTable')" :disabled="tableToolbarDisabled"><Plus :size="14" class="add-color"/>新建表</button>
-            <button @click="deleteToolbarTable" :disabled="tableToolbarDisabled||!toolbarTable"><Trash2 :size="13"/>删除表</button>
+            <button @click="deleteToolbarTable" :disabled="tableToolbarDisabled||!selectedTables.length"><Trash2 :size="13"/>删除表</button>
             <button @click="openTableTool('import')" :disabled="tableToolbarDisabled"><FolderOpen :size="14"/>导入向导</button>
             <button @click="openTableTool('export')" :disabled="tableToolbarDisabled"><Archive :size="14"/>导出向导</button>
            </template>
@@ -619,8 +647,8 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
           </div>
           <div v-if="objectsError" class="objects-error" role="alert"><AlertCircle :size="15"/>{{objectsError}}<button class="tiny-button" aria-label="关闭错误提示" @click="objectsError=''"><X :size="13"/></button></div>
           <div class="object-list-scroll" :aria-busy="objectsLoading">
-            <table v-if="viewMode==='details'" class="object-table" aria-label="数据库对象列表"><thead><tr><th v-for="column in columns" :key="column" :title="column==='行'?'MySQL 提供的估计行数':undefined">{{column}}</th></tr></thead><tbody><tr v-for="row in workspaceRows" :key="row.key" :class="{selected:row.key===selectedRowKey}" tabindex="0" :aria-selected="row.key===selectedRowKey" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)" @keydown.space.prevent="selectWorkspaceRow(row)"><td class="object-name"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="15" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></td><template v-if="selectedDatabase&&(category==='tables'||category==='views')"><td class="numeric">{{row.object?.autoIncrement||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td class="numeric">{{bytesText(row.object?.dataLength??'')}}</td><td>{{row.object?.engine||''}}</td><td class="numeric" title="服务器提供的估计行数">{{row.object?.rows||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selectedDatabase"><td>{{row.object?.engine||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td>{{row.object?.createdAt||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selected"><td>数据库</td></template><template v-else><td>{{row.profile?.host}}</td><td>{{row.profile?.port}}</td><td>{{row.profile?.username}}</td><td>{{envName(row.profile?.environment??'')}}</td><td>{{row.profile&&sessions[row.profile.id]?'已打开':'已关闭'}}</td></template></tr></tbody></table>
-            <div v-else class="object-icon-grid"><button v-for="row in workspaceRows" :key="row.key" :class="{selected:row.key===selectedRowKey}" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="28" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></button></div>
+            <table v-if="viewMode==='details'" class="object-table" aria-label="数据库对象列表" :role="selectedDatabase&&category==='tables'?'grid':undefined" :aria-multiselectable="selectedDatabase&&category==='tables'?true:undefined"><thead><tr><th v-for="column in columns" :key="column" :title="column==='行'?'MySQL 提供的估计行数':undefined">{{column}}</th></tr></thead><tbody><tr v-for="row in workspaceRows" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" tabindex="0" :aria-selected="workspaceRowSelected(row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)"><td class="object-name"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="15" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></td><template v-if="selectedDatabase&&(category==='tables'||category==='views')"><td class="numeric">{{row.object?.autoIncrement||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td class="numeric">{{bytesText(row.object?.dataLength??'')}}</td><td>{{row.object?.engine||''}}</td><td class="numeric" title="服务器提供的估计行数">{{row.object?.rows||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selectedDatabase"><td>{{row.object?.engine||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td>{{row.object?.createdAt||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selected"><td>数据库</td></template><template v-else><td>{{row.profile?.host}}</td><td>{{row.profile?.port}}</td><td>{{row.profile?.username}}</td><td>{{envName(row.profile?.environment??'')}}</td><td>{{row.profile&&sessions[row.profile.id]?'已打开':'已关闭'}}</td></template></tr></tbody></table>
+            <div v-else class="object-icon-grid"><button v-for="row in workspaceRows" :aria-pressed="workspaceRowSelected(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="28" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></button></div>
             <div v-if="objectsLoading" class="object-empty" role="status"><LoaderCircle :size="20" class="spin"/><span>正在读取{{categoryName}}…</span></div><div v-else-if="workspaceRows.length===0" class="object-empty"><span v-if="objectSearch">没有匹配的对象</span><template v-else-if="!selected"><span>{{selectedGroupID?'此组还没有连接，可新建连接或将已有连接移入此组。':'请选择左侧连接，或新建一个 MySQL 连接。'}}</span><button class="link-button" @click="create" :disabled="!!fatalError">新建连接</button></template><span v-else-if="!live">双击左侧连接以打开服务器。</span><span v-else>{{selectedDatabase?'此数据库中没有可见的'+categoryName:'没有可访问的数据库'}}</span></div>
           </div>
           <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
@@ -633,13 +661,13 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
         <div v-if="showInformation&&activeWorkspaceTab==='objects'" class="pane-splitter" role="separator" aria-label="调整信息窗格宽度" aria-orientation="vertical" tabindex="0" :aria-valuenow="rightWidth" aria-valuemin="180" aria-valuemax="360" @pointerdown="startResize($event,'right')" @keydown="resizeKeys($event,'right')"></div>
         <aside v-if="showInformation&&activeWorkspaceTab==='objects'" class="information-pane" :style="{width:rightWidth+'px'}" aria-label="对象信息"><div class="information-tabs"><button :class="{active:informationTab==='info'}" @click="informationTab='info'">信息</button><button v-if="canShowDDL" :class="{active:informationTab==='ddl'}" @click="showDDL">DDL</button><button class="tiny-button" aria-label="关闭信息窗格" @click="showInformation=false"><X :size="12"/></button></div><div v-if="informationTab==='ddl'&&canShowDDL" class="ddl-panel"><span v-if="ddlLoading" role="status">正在读取表定义…</span><p v-else-if="ddlError" role="alert">{{ddlError}}</p><template v-else><button class="link-button ddl-copy-button" @click="copyDDL" :disabled="!ddlText||ddlCopying">复制表定义<CheckCircle2 v-if="ddlCopied" :key="ddlCopyVersion" :size="14" class="ddl-copy-complete" aria-hidden="true"/><span v-if="ddlCopied" class="ddl-copy-status" role="status">已复制表定义</span></button><p v-if="ddlCopyError" role="alert">{{ddlCopyError}}</p><pre>{{ddlText}}</pre></template></div><div v-else class="information-scroll"><div v-if="selected||selectedRow" class="information-heading"><component :is="selectedObject?Table2:selectedDatabase||selectedRow?.database?Database:Plug" :size="48" :class="selectedObject?'category-tables':selectedDatabase||selectedRow?.database?databaseIconClass(selectedID,selectedDatabase||selectedRow?.database||''):'database-icon'"/><div><strong>{{informationName||selected?.name}}</strong><small>{{selectedObject?categoryName:selectedDatabase||selectedRow?.database?'数据库':'MySQL 连接'}}</small></div></div><div v-else class="information-placeholder"><Info :size="22"/><p>选择一个连接或对象<br/>查看详细信息</p></div><div v-if="selectedObject" class="information-context"><span><Plug :size="13"/><span>{{selected?.name}}</span></span><span><Database :size="13"/><span>{{selectedDatabase}}</span></span></div><dl v-if="selected||selectedRow" class="information-details"><template v-if="selectedObject"><dt>行</dt><dd>{{selectedObject.rows||'—'}}<small v-if="selectedObject.rows">估计值</small></dd><dt>引擎</dt><dd>{{selectedObject.engine||'—'}}</dd><dt>自动递增值</dt><dd>{{selectedObject.autoIncrement||'—'}}</dd><dt>创建日期</dt><dd>{{selectedObject.createdAt||'—'}}</dd><dt>修改日期</dt><dd>{{selectedObject.modifiedAt||'—'}}</dd><dt>数据长度</dt><dd>{{bytesText(selectedObject.dataLength)}}</dd><dt>索引长度</dt><dd>{{bytesText(selectedObject.indexLength)}}</dd><dt>注释</dt><dd>{{selectedObject.comment||'—'}}</dd></template><template v-else-if="selectedDatabase||selectedRow?.database"><dt>数据库</dt><dd>{{selectedDatabase||selectedRow?.database}}</dd><dt>连接</dt><dd>{{selected?.name}}</dd><dt>服务器版本</dt><dd>{{live?.serverVersion||'—'}}</dd><dt>当前账户</dt><dd>{{live?.currentUser||'—'}}</dd><template v-if="selectedDatabase"><dt>对象分类</dt><dd>{{categoryName}}</dd><dt>已列出的对象</dt><dd>{{objects.length}}</dd></template></template><template v-else><dt>主机</dt><dd>{{(selected||selectedRow?.profile)?.host}}</dd><dt>端口</dt><dd>{{(selected||selectedRow?.profile)?.port}}</dd><dt>用户名</dt><dd>{{(selected||selectedRow?.profile)?.username}}</dd><dt>环境</dt><dd>{{envName((selected||selectedRow?.profile)?.environment??'')}}</dd><dt>状态</dt><dd>{{live?'已打开':'已关闭'}}</dd><dt>服务器版本</dt><dd>{{live?.serverVersion||'—'}}</dd><dt>密码保存</dt><dd>{{(selected||selectedRow?.profile)?.hasPassword?'系统凭据库':'不保存'}}</dd><dt>修改日期</dt><dd>{{dateText((selected||selectedRow?.profile)?.updatedAt??'')}}</dd><dt>备注</dt><dd>{{(selected||selectedRow?.profile)?.notes||'—'}}</dd></template></dl></div></aside>
       </div>
-      <footer class="application-statusbar"><span>{{activeDocument?activeDocument.title:selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span v-if="activeDocument" class="status-context"><Plug :size="12"/>{{activeDocument.profile.name}}<Database :size="12"/>{{activeDocument.database}}</span><span class="status-context" v-else-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div v-show="activeWorkspaceTab==='objects'" class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
+      <footer class="application-statusbar"><span>{{activeDocument?activeDocument.title:selectedTables.length?'已选择 '+selectedTables.length+' 个表':selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span v-if="activeDocument" class="status-context"><Plug :size="12"/>{{activeDocument.profile.name}}<Database :size="12"/>{{activeDocument.database}}</span><span class="status-context" v-else-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div v-show="activeWorkspaceTab==='objects'" class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
     <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" @close="closeDatabaseTool" @changed="databaseChanged"/>
     <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
     <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
     <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="menuKeys"><button v-for="item in contextItems()" :key="item.label" role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></div>
-    <ConfirmationDialog v-if="!nativeWindows&&confirm.open" :title="confirm.title" :body="confirm.body" :label="confirm.label" @cancel="cancelConfirm" @accept="acceptConfirm"/>
+    <ConfirmationDialog v-if="!nativeWindows&&confirm.open" :title="confirm.title" :body="confirm.body" :label="confirm.label" :items="confirm.items" @cancel="cancelConfirm" @accept="acceptConfirm"/>
     <ConfirmationDialog v-if="!nativeWindows&&detailDialog" v-bind="detailDialog" label="关闭" notice @cancel="detailDialog=undefined" @accept="detailDialog=undefined"/>
     <CellValueDialog v-if="!nativeWindows&&cellValuePicker" v-bind="cellValuePicker" @apply="applyCellValue" @cancel="cellValuePicker=undefined"/>
     <IndexFieldsDialog v-if="!nativeWindows&&indexFieldsPicker" v-bind="indexFieldsPicker" @apply="applyIndexFields" @cancel="indexFieldsPicker=undefined"/>
