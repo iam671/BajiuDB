@@ -9,7 +9,7 @@ it('recognises only a standalone USE command without interpreting arbitrary SQL'
  expect(consoleUse('USE qa_db; SELECT 1;')).toBeUndefined();expect(consoleUse("SELECT 'USE qa_db'")).toBeUndefined();expect(consoleUse('USE ``')).toBeUndefined()
 })
 it('renders exact values and NULL with explicit display limits',()=>{
- const text=consoleResult({columns:['id','amount','note'],rows:[['18446744073709551615','999999999999999999.99',null]],affected:'0',truncated:false})
- expect(text).toContain('18446744073709551615');expect(text).toContain('999999999999999999.99');expect(text).toContain('NULL');expect(text).toContain('1 row(s) in set')
+ const text=consoleResult({columns:['id','amount','note'],rows:[['18446744073709551615','999999999999999999.99',null]],affected:'0',truncated:false},1.236)
+ expect(text).toContain('18446744073709551615');expect(text).toContain('999999999999999999.99');expect(text).toContain('NULL');expect(text).toContain('1 row(s) in set (1.24 sec)')
  expect(consoleResult({columns:['long'],rows:[['a'.repeat(100)]],affected:'0',truncated:true})).toContain('长单元格已缩略')
 })

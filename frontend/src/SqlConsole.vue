@@ -28,12 +28,16 @@ async function execute(){
  const target=consoleUse(sql),requestDatabase=target??database.value,requestSQL=target?'USE '+quoteIdentifier(target)+';':sql
  task=crypto.randomUUID();running.value=true;stopping.value=false
  try{
+  const started=performance.now()
   const response=await api.DatabaseAdmin(task,props.profile.id,requestDatabase,{operation:'query',sql:requestSQL})
+  const elapsedSeconds=Math.max(0,performance.now()-started)/1000
   if(disposed)return
-  for(const result of response.results)append(consoleResult(result))
+  const batch=response.results.length>1||response.completed>1||!!response.error
+  for(const result of response.results)append(consoleResult(result,batch?undefined:elapsedSeconds))
   if(response.error)append(response.error,true)
   else if(target&&response.completed===1){database.value=target;emit('database-change',target);append('Database changed · '+target)}
   if(response.completed>response.results.length)append('已执行 '+response.completed+' 条语句；仅保留前 '+response.results.length+' 个结果。')
+  if(batch)append('批次总耗时：'+elapsedSeconds.toFixed(2)+' sec')
  }catch(e){if(!disposed)append(errorText(e),true)}finally{task='';running.value=false;stopping.value=false;if(!disposed)void focus()}
 }
 async function stop(){if(!task||stopping.value)return;stopping.value=true;try{await api.CancelDatabaseTask(task)}catch(e){if(!disposed)append(errorText(e),true)}finally{stopping.value=false}}
