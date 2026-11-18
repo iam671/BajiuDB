@@ -112,6 +112,10 @@ func (a *App) SaveDatabaseReport(name, text string) (string, error) {
 	if err != nil || path == "" {
 		return "", err
 	}
+	return writeDatabaseReport(path, text)
+}
+
+func writeDatabaseReport(path, text string) (string, error) {
 	temp, err := os.CreateTemp(filepath.Dir(path), ".bajiu-export-*")
 	if err != nil {
 		return "", err

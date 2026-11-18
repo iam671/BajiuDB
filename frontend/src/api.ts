@@ -33,7 +33,7 @@ type Bridge = {
   DatabaseAdmin(task:string,id:string,database:string,request:AdminRequest):Promise<AdminResult>;
   CancelDatabaseTask(task:string):Promise<void>;OpenSQLFile():Promise<{path:string;text:string;statements:number}>;
   SaveDatabaseReport(name:string,text:string):Promise<string>;
-  DumpDatabaseToDirectory(task:string,id:string,database:string,includeData:boolean):Promise<string>;
+  DumpDatabaseToFile(task:string,id:string,database:string,includeData:boolean):Promise<string>;
   OpenCSVFile():Promise<{path:string;text:string}>;
   OpenWindowDialog(state:WindowDialog):Promise<void>;GetWindowDialog(id:string):Promise<WindowDialog>;UpdateWindowDialog(state:WindowDialog):Promise<void>;CloseWindowDialog(id:string):Promise<void>;SendWindowDialogAction(action:DialogAction):Promise<void>;
 }

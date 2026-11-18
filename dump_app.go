@@ -3,38 +3,41 @@ package main
 import (
 	"bajiudb/internal/connections"
 	"errors"
-	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// DumpDatabaseToDirectory asks for the destination before reading any database data.
-func (a *App) DumpDatabaseToDirectory(task, id, database string, includeData bool) (string, error) {
+// DumpDatabaseToFile asks for the filename before reading any database data.
+func (a *App) DumpDatabaseToFile(task, id, database string, includeData bool) (string, error) {
 	if a.startupErr != nil {
 		return "", a.startupErr
 	}
 	if a.desktop == nil {
-		return "", errors.New("请在桌面程序中选择转储目录")
+		return "", errors.New("请在桌面程序中选择转储文件")
 	}
-	directory, err := a.desktop.Dialog.OpenFile().SetTitle("选择 SQL 转储保存目录").CanChooseFiles(false).CanChooseDirectories(true).CanCreateDirectories(true).AttachToWindow(a.mainWindow).PromptForSingleSelection()
+	path, err := a.desktop.Dialog.SaveFile().SetFilename(dumpFilename(database)).AddFilter("SQL 脚本文件 (*.sql)", "*.sql").CanCreateDirectories(true).AttachToWindow(a.mainWindow).PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
-	return dumpToDirectory(directory, database, includeData, func() (connections.AdminResult, error) {
+	return dumpToFile(path, func() (connections.AdminResult, error) {
 		return a.DatabaseAdmin(task, id, database, connections.AdminRequest{Operation: "dump", IncludeData: includeData})
 	})
 }
 
-func dumpToDirectory(directory, database string, includeData bool, read func() (connections.AdminResult, error)) (string, error) {
-	if directory == "" {
+func dumpToFile(path string, read func() (connections.AdminResult, error)) (string, error) {
+	if path == "" {
 		return "", nil
 	}
-	info, err := os.Stat(directory)
+	info, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", errors.New("请选择保存目录")
+		return "", errors.New("请选择有效的保存位置")
+	}
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return "", errors.New("请选择 SQL 文件名，不能选择目录")
 	}
 	result, err := read()
 	if err != nil {
@@ -46,37 +49,22 @@ func dumpToDirectory(directory, database string, includeData bool, read func() (
 	if len(result.Text) > 64<<20 {
 		return "", errors.New("转储文件超过 64 MB")
 	}
-	name := strings.Map(func(r rune) rune {
+	return writeDatabaseReport(path, result.Text)
+}
+
+func dumpFilename(database string) string {
+	name := strings.TrimRight(strings.Map(func(r rune) rune {
 		if r < 32 || strings.ContainsRune(`<>:"/\|?*`, r) {
 			return '_'
 		}
 		return r
-	}, database)
-	mode := "structure"
-	if includeData {
-		mode = "structure-data"
+	}, database), ". ")
+	if name == "" {
+		name = "database"
 	}
-	// A unique file prevents silently overwriting an earlier backup.
-	file, err := os.CreateTemp(directory, "BajiuDB-"+name+"-"+mode+"-*.sql")
-	if err != nil {
-		return "", err
+	base := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
+	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || (len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9') {
+		name = "_" + name
 	}
-	complete := false
-	defer func() {
-		_ = file.Close()
-		if !complete {
-			_ = os.Remove(file.Name())
-		}
-	}()
-	if _, err = file.WriteString(result.Text); err != nil {
-		return "", fmt.Errorf("写入转储文件失败：%w", err)
-	}
-	if err = file.Sync(); err != nil {
-		return "", err
-	}
-	if err = file.Close(); err != nil {
-		return "", err
-	}
-	complete = true
-	return file.Name(), nil
+	return name + ".sql"
 }

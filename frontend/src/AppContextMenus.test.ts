@@ -26,13 +26,13 @@ it('opens dump choices using the keyboard, returns to the parent and dismisses t
  parent.dispatchEvent(mouse('mouseenter'));await settle();expect(root.querySelector('.context-submenu')).not.toBeNull();root.querySelector('.application-statusbar')!.dispatchEvent(mouse('pointerdown'));await settle();expect(root.querySelector('.connection-context-menu')).toBeNull()
  await context('.tree-database');button('转储SQL文件').click();await settle();root.querySelector('.application-statusbar')!.dispatchEvent(mouse('contextmenu'));await settle();expect(root.querySelector('.connection-context-menu')).toBeNull()
 })
-it.each([['结构和数据...',true],['仅结构...',false]] as const)('exports %s directly through the native directory picker without a tool window',async(label,includeData)=>{
- const dump=vi.fn(async()=> 'qa-directory/qa_db.sql'),open=vi.fn(async()=>{});installNativeBridge(async()=>undefined);Object.assign(window.go!.main.App,{DumpDatabaseToDirectory:dump,OpenWindowDialog:open,CloseWindowDialog:vi.fn(async()=>{}),UpdateWindowDialog:vi.fn(async()=>{})})
+it.each([['结构和数据...',true],['仅结构...',false]] as const)('exports %s directly through the native Save As dialog without a tool window',async(label,includeData)=>{
+ const dump=vi.fn(async()=> 'qa-directory/qa_db.sql'),open=vi.fn(async()=>{});installNativeBridge(async()=>undefined);Object.assign(window.go!.main.App,{DumpDatabaseToFile:dump,OpenWindowDialog:open,CloseWindowDialog:vi.fn(async()=>{}),UpdateWindowDialog:vi.fn(async()=>{})})
  await mount();await context('.tree-database');button('转储SQL文件').click();await settle();button(label).dispatchEvent(mouse('pointerdown'));await settle();expect(root.querySelector('.context-submenu')).not.toBeNull();button(label).click();await settle()
  expect(dump).toHaveBeenCalledExactlyOnceWith(expect.any(String),'qa','qa_db',includeData);expect(open).not.toHaveBeenCalled();expect(root.querySelector('.connection-context-menu')).toBeNull();expect(root.querySelector('.db-tools-window')).toBeNull();expect(root.querySelector('.dump-feedback')?.textContent).toContain('qa-directory/qa_db.sql')
 })
-it('handles directory cancellation and export errors inline without opening another window',async()=>{
- const dump=vi.fn(async()=> '');Object.assign(window.go!.main.App,{DumpDatabaseToDirectory:dump});await mount()
+it('handles Save As cancellation and export errors inline without opening another window',async()=>{
+ const dump=vi.fn(async()=> '');Object.assign(window.go!.main.App,{DumpDatabaseToFile:dump});await mount()
  const run=async()=>{await context('.tree-database');button('转储SQL文件').click();await settle();button('仅结构...').click();await settle()}
  await run();expect(root.querySelector('.db-tools-window')).toBeNull();expect(root.querySelector('.dump-feedback')).toBeNull();expect(root.querySelector('.navigation-error')).toBeNull()
  dump.mockRejectedValueOnce(new Error('destination is not writable'));await run();expect(root.querySelector('.navigation-error')?.textContent).toContain('destination is not writable');expect(root.querySelector('.dump-feedback')).toBeNull()

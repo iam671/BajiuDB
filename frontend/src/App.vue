@@ -500,8 +500,8 @@ function closeDatabase(p:Profile,database:string,deleted=false){
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
 async function dumpDatabase(p:Profile,database:string,includeData:boolean){
  closeMenus();if(dumpTask.value)return
- const task=crypto.randomUUID();dumpTask.value=task;navigationError.value='';dumpStatus.value='请选择保存目录，随后转储 '+p.name+' / '+database+'…'
- try{const path=await api.DumpDatabaseToDirectory(task,p.id,database,includeData);dumpStatus.value=path?'SQL 文件已保存：'+path:''}catch(error){dumpStatus.value='';showNavigationError('转储 SQL 文件失败：'+errorText(error))}finally{dumpTask.value=''}
+ const task=crypto.randomUUID();dumpTask.value=task;navigationError.value='';dumpStatus.value='请选择保存文件名和位置，随后转储 '+p.name+' / '+database+'…'
+ try{const path=await api.DumpDatabaseToFile(task,p.id,database,includeData);dumpStatus.value=path?'SQL 文件已保存：'+path:''}catch(error){dumpStatus.value='';showNavigationError('转储 SQL 文件失败：'+errorText(error))}finally{dumpTask.value=''}
 }
 function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string,dumpIncludeData?:boolean){closeMenus();if(mode==='dump'){void dumpDatabase(p,database,dumpIncludeData??true);return}if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
 async function databaseChanged(operation:string,name:string){
