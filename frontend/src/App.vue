@@ -86,7 +86,7 @@ const desktop = ref(isDesktop())
 const nativeWindows=hasNativeWindows()
 const menu = ref('')
 const contextMenu = reactive({open:false,x:0,y:0,kind:'connection' as 'root'|'group'|'connection'|'database'|'table'|'table-blank',database:'',connectionID:'',table:'',fromObjectList:false})
-const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string;dumpIncludeData?:boolean}|null>(null)
+const databaseTool=ref<{profile:Profile;database:string;mode:Exclude<DatabaseToolMode,'console'>;table?:string;initialSQL?:string}|null>(null)
 type WorkspaceDocument={id:string;title:string;profile:Profile;database:string}&({kind:'query';initialSQL:string;dirty:boolean}|{kind:'console';dirty:boolean}|{kind:'table';table:string;section:TableSection;dirty:boolean}|{kind:'design';table?:string;dirty:boolean})
 const workspaceTabs=ref<WorkspaceDocument[]>([]),activeWorkspaceTab=ref('objects')
 const activeDocument=computed(()=>workspaceTabs.value.find(tab=>tab.id===activeWorkspaceTab.value))
@@ -118,7 +118,7 @@ function workspaceTabKeys(event:KeyboardEvent,id:string){
  event.preventDefault();const ids=['objects',...workspaceTabs.value.map(tab=>tab.id)],index=ids.indexOf(id)
  activateWorkspaceTab(ids[event.key==='Home'?0:event.key==='End'?ids.length-1:(index+(event.key==='ArrowRight'?1:ids.length-1))%ids.length]!,true)
 }
-const navigationError=ref('')
+const navigationError=ref(''),dumpTask=ref(''),dumpStatus=ref('')
 const draggedConnectionID=ref('')
 const movingConnectionID=ref('')
 const dropTarget=ref<string|null>(null)
@@ -219,9 +219,9 @@ function connectionInput(p:Profile){const input=fromProfile(p);if(transientPassw
 function ask(title:string,body:string,label:string,action:()=>void|Promise<void>,danger=false,items:string[]=[]){Object.assign(confirm,{open:true,title,body,label,action,danger,exit:false,items});nextTick(()=>document.querySelector<HTMLButtonElement>('[data-confirm-cancel]')?.focus())}
 function requestQuit(){
  if(confirm.open&&confirm.exit)return
- const pending=workspaceTabs.value.some(tab=>tab.dirty)||(dialogOpen.value&&dirty.value)||!!indexFieldsPicker.value||!!tableNamePrompt.value||!!cellValuePicker.value||(groupEditor.active&&!!groupEditor.name.trim())
+ const pending=workspaceTabs.value.some(tab=>tab.dirty)||(dialogOpen.value&&dirty.value)||!!indexFieldsPicker.value||!!tableNamePrompt.value||!!cellValuePicker.value||!!dumpTask.value||(groupEditor.active&&!!groupEditor.name.trim())
  const quit=async()=>{try{if(desktop.value)await api.ConfirmQuitApp()}catch(e){showNavigationError(errorText(e))}}
- if(pending){ask('退出并放弃未保存的修改？','当前有未保存内容、正在进行的查询或未提交事务。退出将放弃草稿并结束连接，已提交操作不会回滚。','放弃修改并退出',quit,true);confirm.exit=true}else void quit().catch(e=>showNavigationError(errorText(e)))
+ if(pending){ask('退出并放弃未保存的修改？','当前有未保存内容、正在进行的查询、转储或未提交事务。退出将放弃草稿并结束连接，已提交操作不会回滚。','放弃修改并退出',quit,true);confirm.exit=true}else void quit().catch(e=>showNavigationError(errorText(e)))
 }
 async function acceptConfirm(){const action=confirm.action;confirm.open=false;confirm.action=null;await action?.()}
 function cancelConfirm(){confirm.open=false;confirm.action=null;nextTick(()=>{if(dialogOpen.value)document.getElementById('connection-name')?.focus();else(document.querySelector('[data-tree-row]') as HTMLElement|null)?.focus()})}
@@ -498,7 +498,12 @@ function closeDatabase(p:Profile,database:string,deleted=false){
  else finish()
 }
 function closeDatabaseTool(){databaseTool.value=null;nextTick(()=>document.querySelector<HTMLElement>('.tree-row.selected')?.focus())}
-function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string,dumpIncludeData?:boolean){closeMenus();if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table,dumpIncludeData}}
+async function dumpDatabase(p:Profile,database:string,includeData:boolean){
+ closeMenus();if(dumpTask.value)return
+ const task=crypto.randomUUID();dumpTask.value=task;navigationError.value='';dumpStatus.value='请选择保存目录，随后转储 '+p.name+' / '+database+'…'
+ try{const path=await api.DumpDatabaseToDirectory(task,p.id,database,includeData);dumpStatus.value=path?'SQL 文件已保存：'+path:''}catch(error){dumpStatus.value='';showNavigationError('转储 SQL 文件失败：'+errorText(error))}finally{dumpTask.value=''}
+}
+function showDatabaseTool(p:Profile,database:string,mode:DatabaseToolMode,table?:string,dumpIncludeData?:boolean){closeMenus();if(mode==='dump'){void dumpDatabase(p,database,dumpIncludeData??true);return}if(mode==='createTable'||mode==='designTable'){openDesignTab(p,database,mode==='designTable'?table:undefined);return}if(mode==='query'){createQueryTab(p,database,table);return}if(mode==='console'){createConsoleTab(p,database);return}if(mode==='openTable'&&table){openTableTab(p,database,table);return}databaseTool.value={profile:p,database,mode,table}}
 async function databaseChanged(operation:string,name:string){
  const target=databaseTool.value;if(!target)return
  if(operation==='table'){try{await refreshTableList(target.profile,target.database)}catch(e){showNavigationError(errorText(e))}return}
@@ -517,7 +522,7 @@ function contextItems():MenuItem[]{
 
  if(contextMenu.kind==='database'){
   const p=profiles.value.find(p=>p.id===contextMenu.connectionID),database=contextMenu.database;if(!p)return []
-  return [{label:databaseIsOpen(p.id,database)?'关闭数据库':'打开数据库',group:'session',action:()=>{if(databaseIsOpen(p.id,database))closeDatabase(p,database);else void selectDatabase(p,database)}},...([['alter','编辑数据库'],['create','新建数据库'],['drop','删除数据库'],['query','新建查询'],['console','命令行界面'],['run','运行SQL文件'],['dump','转储SQL文件'],['dictionary','数据字典'],['model','逆向数据库到模型']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,group:['alter','create','drop'].includes(mode)?'schema':mode==='query'?'query':'tools',danger:mode==='drop',children:mode==='dump'?[{label:'结构和数据...',action:()=>showDatabaseTool(p,database,'dump',undefined,true)},{label:'仅结构...',action:()=>showDatabaseTool(p,database,'dump',undefined,false)}]:undefined,action:()=>showDatabaseTool(p,database,mode)})),{label:'刷新',group:'refresh',action:async()=>{try{sessions[p.id]=await api.RefreshDatabases(p.id);if(databaseIsOpen(p.id,database)){await selectDatabase(p,database);await loadObjects()}}catch(e){showNavigationError(errorText(e))}}}]
+  return [{label:databaseIsOpen(p.id,database)?'关闭数据库':'打开数据库',group:'session',action:()=>{if(databaseIsOpen(p.id,database))closeDatabase(p,database);else void selectDatabase(p,database)}},...([['alter','编辑数据库'],['create','新建数据库'],['drop','删除数据库'],['query','新建查询'],['console','命令行界面'],['run','运行SQL文件'],['dump','转储SQL文件'],['dictionary','数据字典'],['model','逆向数据库到模型']] as [DatabaseToolMode,string][]).map<MenuItem>(([mode,label])=>({label,group:['alter','create','drop'].includes(mode)?'schema':mode==='query'?'query':'tools',danger:mode==='drop',children:mode==='dump'?[{label:'结构和数据...',disabled:!!dumpTask.value,action:()=>showDatabaseTool(p,database,'dump',undefined,true)},{label:'仅结构...',disabled:!!dumpTask.value,action:()=>showDatabaseTool(p,database,'dump',undefined,false)}]:undefined,action:()=>showDatabaseTool(p,database,mode)})),{label:'刷新',group:'refresh',action:async()=>{try{sessions[p.id]=await api.RefreshDatabases(p.id);if(databaseIsOpen(p.id,database)){await selectDatabase(p,database);await loadObjects()}}catch(e){showNavigationError(errorText(e))}}}]
  }
  if(contextMenu.kind==='connection')return [...connectionMenu().slice(0,3),{label:'移至分组…',group:'group',disabled:!selected.value||!!busy.value||(!connectionGroups.value.length&&!selected.value.groupId),action:showGroupDialog},...connectionMenu().slice(3)]
  const items:MenuItem[]=[{label:'新建连接…',group:'create',disabled:!!busy.value||!!fatalError.value,action:create}]
@@ -588,7 +593,7 @@ const nativeDialogDefinitions=computed(()=>{
  const windows=[]
  if(dialogOpen.value)windows.push({key:'connection',kind:'connection' as const,title:'MySQL - '+(connectOnSave.value?'打开连接':editingID.value?'编辑连接':'新建连接'),width:580,height:580,payload:{model:form,clientVersion:connectionClientVersion.value,busy:busy.value,errors,result:testResult.value,error:testError.value,editing:!!editingID.value,connectOnSave:connectOnSave.value,fatal:!!fatalError.value,groups:connectionGroups.value}})
  if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
- if(databaseTool.value){const{profile,database,mode,table,initialSQL,dumpIncludeData}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL,dumpIncludeData}})}
+ if(databaseTool.value){const{profile,database,mode,table,initialSQL}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL}})}
  if(about.value)windows.push({key:'about',kind:'about' as const,title:'关于 Bajiu DB · 捌玖',width:365,height:310,payload:{}})
  if(cellValuePicker.value){const{apply,...payload}=cellValuePicker.value;windows.push({key:'cell-value',kind:'cell-value' as const,title:'编辑 '+payload.column.name,width:['json','text','binary'].includes(quickKind(payload.column))?620:380,height:quickKind(payload.column)==='datetime'?510:quickKind(payload.column)==='date'?460:440,payload})}
  if(indexFieldsPicker.value){const{apply,...payload}=indexFieldsPicker.value;windows.push({key:'index-fields',kind:'index-fields' as const,title:'选择索引字段',width:480,height:440,payload})}
@@ -612,7 +617,7 @@ function nativeDialogAction(key:string,event:DialogAction){
  else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')closeDatabaseTool()}
 }
 useNativeDialogs(nativeDialogDefinitions,nativeDialogAction,showNavigationError)
-onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelectionOutside,true);clearInterval(poll);document.removeEventListener('keydown',shortcuts);window.removeEventListener('bajiu:main-close',requestQuit);releaseDrag?.();transientPasswords.clear()})
+onUnmounted(()=>{if(dumpTask.value)void api.CancelDatabaseTask(dumpTask.value);document.removeEventListener('pointerdown',cancelTableSelectionOutside,true);clearInterval(poll);document.removeEventListener('keydown',shortcuts);window.removeEventListener('bajiu:main-close',requestQuit);releaseDrag?.();transientPasswords.clear()})
 </script>
 
 <template>
@@ -636,6 +641,7 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelection
         <button class="large-tool" :disabled="!toolLive||!toolDatabase" @click="openSelectedDatabaseTool('query')"><FileText :size="26"/><span>查询</span></button><button class="large-tool" disabled title="当前版本尚未提供备份"><Archive :size="26"/><span>备份</span></button><button class="large-tool" disabled title="当前版本尚未提供自动运行"><Workflow :size="26"/><span>自动运行</span></button><button class="large-tool" :disabled="!toolLive||!toolDatabase" @click="openSelectedDatabaseTool('model')"><Network :size="26"/><span>模型</span></button><button class="large-tool" disabled title="当前版本尚未提供图表"><ChartNoAxesColumn :size="26"/><span>图表</span></button>
       </div>
       <div v-if="!desktop" class="workspace-banner">界面预览模式。请在桌面版中保存和连接真实 MySQL。</div>
+      <div v-if="dumpStatus" class="workspace-banner dump-feedback" role="status"><LoaderCircle v-if="dumpTask" :size="13" class="spin"/><span>{{dumpStatus}}</span><button v-if="!dumpTask" class="tiny-button" aria-label="关闭转储提示" @click="dumpStatus=''"><X :size="12"/></button></div>
       <div v-if="fatalError" class="workspace-banner error" role="alert"><AlertCircle :size="14"/>{{fatalError}}；当前已停止保存操作。</div>
       <div class="workspace-body">
         <aside v-if="showSidebar" class="navigation-pane" :style="{width:leftWidth+'px'}" aria-label="连接导航">
@@ -720,7 +726,7 @@ onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelection
       </div>
       <footer class="application-statusbar"><span>{{activeDocument?activeDocument.title:selectedTables.length?'已选择 '+selectedTables.length+' 个表':selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span v-if="activeDocument" class="status-context"><Plug :size="12"/>{{activeDocument.profile.name}}<Database :size="12"/>{{activeDocument.database}}</span><span class="status-context" v-else-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div v-show="activeWorkspaceTab==='objects'" class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
-    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" :dumpIncludeData="databaseTool.dumpIncludeData" @close="closeDatabaseTool" @changed="databaseChanged"/>
+    <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" @close="closeDatabaseTool" @changed="databaseChanged"/>
     <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
     <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
     <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="contextKeys"><template v-for="(item,index) in contextMenuItems" :key="item.label"><div v-if="index>0&&item.group!==contextMenuItems[index-1]?.group" class="context-menu-separator" role="separator"></div><div v-if="item.children" class="context-submenu-group" @mouseleave="contextSubmenu=''"><button data-context-main :data-context-submenu="item.label" role="menuitem" aria-haspopup="menu" :aria-expanded="contextSubmenu===item.label" :disabled="item.disabled" @mouseenter="openContextSubmenu(item,$event.currentTarget as HTMLElement)" @click="openContextSubmenu(item,$event.currentTarget as HTMLElement,true)">{{item.label}}<ChevronRight :size="12"/></button><div v-if="contextSubmenu===item.label" class="context-submenu menu-popup" role="menu" :aria-label="item.label" :style="contextSubmenuStyle"><button v-for="child in item.children" :key="child.label" role="menuitem" :disabled="child.disabled" @click="invoke(child)">{{child.label}}</button></div></div><button v-else data-context-main role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @mouseenter="contextSubmenu=''" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></template></div>

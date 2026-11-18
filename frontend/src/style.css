@@ -97,3 +97,5 @@
 .object-list-scroll{position:relative;user-select:none}.object-selection-rectangle{position:absolute;z-index:6;border:1px solid #1687d9;background:#1687d926;pointer-events:none;box-sizing:border-box;min-width:1px;min-height:1px}.object-list-scroll.is-marquee-selecting{cursor:crosshair}
 
 .context-menu-separator{height:0;min-height:0;margin:4px 3px;border:0;border-top:1px solid #d9dfe4;background:transparent;box-shadow:none;flex-shrink:0;pointer-events:none}.context-submenu-group>button{justify-content:space-between}.context-submenu-group>button:hover:not(:disabled),.context-submenu-group>button[aria-expanded=true]{background:#dceeff;border-color:#99d1ff}.context-submenu.menu-popup{position:fixed;z-index:1020;width:185px;min-width:185px}
+
+.dump-feedback{display:flex;align-items:center;gap:6px}.dump-feedback>span{flex:1;min-width:0;overflow-wrap:anywhere}
