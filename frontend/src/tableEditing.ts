@@ -1,5 +1,6 @@
 import type {QueryResult} from './api'
 import {quoteIdentifier as qi,sqlText} from './tableData'
+import {queryPageScope,type EditableQuery} from './queryEditing'
 export type TableSection='data'|'fields'|'indexes'|'foreignKeys'|'triggers'
 export interface TableColumn{name:string;type:string;nullable:boolean;key:string;defaultValue:string|null;extra:string;comment:string;generated:boolean;binary:boolean;spatial:boolean}
 export interface TableIndex{name:string;unique:boolean;type:string;columns:string[];parts:string[]}
@@ -17,7 +18,7 @@ export function metadataSQL(database:string,table:string){const db=sqlText(datab
  'SELECT TRIGGER_NAME,ACTION_TIMING,EVENT_MANIPULATION,ACTION_STATEMENT FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='+db+' AND EVENT_OBJECT_TABLE='+name+' ORDER BY TRIGGER_NAME',
 ].join(';\n')+';'}
 function readExpression(column:TableColumn){const bit=column.type.match(/^bit(?:\((\d+)\))?/i);if(bit){const width=Math.min(8,Math.max(1,Math.ceil(Number(bit[1]??1)/8)))*2;return 'LPAD(HEX('+qi(column.name)+'),'+width+",'0')"}return column.binary?'HEX('+qi(column.name)+')':'CONVERT('+qi(column.name)+' USING utf8mb4)'}
-export function pageSQL(database:string,table:string,columns:TableColumn[],keys:string[],page:number,filter:TableFilter,sort:string,descending:boolean){
+export function pageSQL(database:string,table:string,columns:TableColumn[],keys:string[],page:number,filter:TableFilter,sort:string,descending:boolean,query?:EditableQuery){
  if(!Number.isSafeInteger(page)||page<1||page>1000000)throw new Error('页码须为 1–1,000,000')
  if(!columns.length)throw new Error('请先读取表字段')
  const selected=filter.column?columns.filter(c=>c.name===filter.column):columns
@@ -26,7 +27,10 @@ export function pageSQL(database:string,table:string,columns:TableColumn[],keys:
  if(filter.operator==='null'||filter.operator==='notNull'){if(!filter.column)throw new Error('请先选择筛选字段');where=qi(selected[0]!.name)+(filter.operator==='null'?' IS NULL':' IS NOT NULL')}
  else if(filter.value!==''||(filter.column&&filter.operator!=='contains')){const operators:Record<string,string>={equal:'=',notEqual:'<>',greater:'>',less:'<'};where=selected.map(column=>filter.operator==='contains'?'LOCATE('+sqlText(filter.value)+','+readExpression(column)+')>0':qi(column.name)+(operators[filter.operator]??'=')+literal(column,filter.value)).map(text=>'('+text+')').join(' OR ')}
  const order=sort?columns.filter(c=>c.name===sort).map(c=>c.name):keys
- return 'SELECT '+columns.map(c=>readExpression(c)+' AS '+qi(c.name)).join(',')+' FROM '+tableName(database,table)+(where?' WHERE '+where:'')+(order.length?' ORDER BY '+order.map(name=>qi(name)+(descending?' DESC':' ASC')).join(','):'')+' LIMIT 1001 OFFSET '+((page-1)*1000)+';'
+ const scope=query?queryPageScope(query,page):undefined
+ if(scope?.where)where='('+scope.where+')'+(where?' AND ('+where+')':'')
+ const ordering=!sort&&scope?.order?scope.order:order.map(name=>qi(name)+(descending?' DESC':' ASC')).join(',')
+ return 'SELECT '+columns.map(c=>readExpression(c)+' AS '+qi(c.name)).join(',')+' FROM '+tableName(database,table)+(scope?.alias??'')+(where?' WHERE '+where:'')+(ordering?' ORDER BY '+ordering:'')+' LIMIT '+(scope?.limit??1001)+' OFFSET '+(scope?.offset??((page-1)*1000))+';'
 }
 function literal(column:TableColumn,value:string|null){if(value===null)return 'NULL';if(!column.binary)return sqlText(value);const hex=value.replace(/^0x/i,'');if(hex.length%2||!/^[a-f0-9]*$/i.test(hex))throw new Error(column.name+' 需要偶数位十六进制内容');if(/^bit\b/i.test(column.type)){if(hex.length>16)throw new Error(column.name+' 的 BIT 值最多为 8 字节');return hex?BigInt('0x'+hex).toString():'0'}return "X'"+hex+"'"}
 export function makeDraft(columns:TableColumn[],row:(string|null)[]|undefined):CellDraft[]{return columns.map((c,i)=>row?{mode:row[i]===null?'null':'value',value:row[i]??''}:{mode:c.generated||/auto_increment/i.test(c.extra)||c.defaultValue!==null?'default':c.nullable?'null':'value',value:''})}

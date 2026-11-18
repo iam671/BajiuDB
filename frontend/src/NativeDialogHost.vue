@@ -9,6 +9,7 @@ import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
 import DatabaseTools from './DatabaseTools.vue'
 import IndexFieldsDialog from './IndexFieldsDialog.vue'
+import CellValueDialog from './CellValueDialog.vue'
 import TableNameDialog from './TableNameDialog.vue'
 const id=new URLSearchParams(location.search).get('dialog')??''
 const state=ref<WindowDialog>(),error=ref(''),tool=ref<InstanceType<typeof DatabaseTools>>()
@@ -39,6 +40,7 @@ onUnmounted(()=>{clearTimeout(syncTimer);window.removeEventListener('bajiu:dialo
  <template v-if="state">
   <ConnectionDialog v-if="state.kind==='connection'" v-bind="state.payload" @save="formAction('save')" @cancel="formAction('cancel')" @test="formAction('test')" @password="formAction('password')" @forget="formAction('forget')" @choose-c-a="formAction('chooseCA')" @choose-ssh-key="formAction('chooseSSHKey')"/>
   <GroupDialog v-else-if="state.kind==='group'" v-bind="state.payload" @save="formAction('save')" @cancel="formAction('cancel')"/>
+  <CellValueDialog v-else-if="state.kind==='cell-value'" v-bind="state.payload" @apply="cell=>action('apply',{cell})" @cancel="action('cancel')"/>
   <IndexFieldsDialog v-else-if="state.kind==='index-fields'" v-bind="state.payload" @apply="value=>action('apply',{value})" @cancel="action('cancel')"/>
   <TableNameDialog v-else-if="state.kind==='confirm'&&state.payload.namePrompt" :value="state.payload.value" @save="value=>action('accept',{value})" @cancel="action('cancel')"/>
   <ConfirmationDialog v-else-if="state.kind==='confirm'" v-bind="state.payload" @cancel="action('cancel')" @accept="action('accept')"/>

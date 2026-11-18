@@ -41,3 +41,14 @@ func TestIndexFieldsWindow(t *testing.T) {
 		t.Fatal("index field selection must use a resizable native window")
 	}
 }
+
+func TestCellValueWindow(t *testing.T) {
+	state := WindowDialog{ID: "qa-cell-value", Kind: "cell-value", Width: 380, Height: 460, Payload: json.RawMessage(`{"cell":{"mode":"value","value":"2026-11-18"}}`)}
+	if err := validWindowDialog(state); err != nil {
+		t.Fatal(err)
+	}
+	options := dialogWindowOptions(state)
+	if options.DisableResize || options.Width != 380 || options.Height != 460 {
+		t.Fatal("cell value editor must use an independent resizable native window")
+	}
+}
