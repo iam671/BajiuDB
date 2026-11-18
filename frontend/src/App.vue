@@ -22,6 +22,7 @@ import AboutDialog from './AboutDialog.vue'
 import {quoteIdentifier} from './tableData'
 import {useNativeDialogs} from './nativeDialogs'
 import {useMenuDismissal} from './menuDismissal'
+import {useObjectMarquee} from './objectMarquee'
 import {hasNativeWindows,type DialogDetails,type DialogAction} from './api'
 import { api, defaults, fromProfile, errorText, isDesktop, type Profile, type ConnectionInput, type ConnectionGroup, type SessionInfo, type DatabaseObject, type TestResult } from './api'
 
@@ -430,6 +431,19 @@ function objectListKeys(event:KeyboardEvent,row:WorkspaceRow){
  else if(event.key==='Delete'){event.preventDefault();event.stopPropagation();deleteToolbarTable()}
 }
 watch([selectedID,selectedDatabase,category,objectSearch],()=>{clearTableSelection();selectedRowKey.value='';clearDDL()},{flush:'sync'})
+const objectListViewport=ref<HTMLElement>()
+function applyObjectSelection(keys:string[]){
+ const rows=workspaceRows.value.filter(row=>row.kind==='tables'),allowed=new Set(keys)
+ selectedTableKeys.value=new Set(rows.filter(row=>allowed.has(row.key)).map(row=>row.key));tableSelectionAnchor.value=selectedTableKeys.value.values().next().value??''
+ focusWorkspaceRow(rows.find(row=>selectedTableKeys.value.has(row.key)))
+}
+const objectMarquee=useObjectMarquee({viewport:objectListViewport,enabled:()=>activeWorkspaceTab.value==='objects'&&!!selectedDatabase.value&&category.value==='tables'&&!busy.value&&!objectsLoading.value&&!confirm.open&&!dialogOpen.value&&!groupDialogOpen.value&&!databaseTool.value&&!about.value&&!detailDialog.value&&!cellValuePicker.value&&!indexFieldsPicker.value&&!tableNamePrompt.value,scope:()=>JSON.stringify([selectedID.value,selectedDatabase.value,category.value,viewMode.value,objectSearch.value,objectRequest,workspaceRows.value.map(row=>row.key)]),selection:()=>selectedTableKeys.value,apply:applyObjectSelection,start:()=>{closeMenus();clearDDL()}})
+function cancelTableSelectionOutside(event:PointerEvent){
+ if(activeWorkspaceTab.value!=='objects'||!selectedTableKeys.value.size||confirm.open||dialogOpen.value||groupDialogOpen.value||databaseTool.value||about.value||detailDialog.value||cellValuePicker.value||indexFieldsPicker.value||tableNamePrompt.value)return
+ const target=event.target;if(!(target instanceof Element)||objectListViewport.value?.contains(target))return
+ if(target.closest('.object-toolbar button,.menu-popup,.confirmation-overlay,.information-pane button,.information-pane textarea,.ddl-panel pre'))return
+ applyObjectSelection([])
+}
 async function showDDL(){
  if(!canShowDDL.value||!selectedObject.value)return
  informationTab.value='ddl';if(ddlLoading.value||ddlText.value)return
@@ -521,6 +535,7 @@ function shortcuts(e:KeyboardEvent){
 watch(()=>JSON.stringify(form),()=>{testResult.value=null;testError.value=''})
 watch([leftWidth,rightWidth,showSidebar,showInformation,viewMode],()=>{try{localStorage.setItem('bajiu.workspace-layout',JSON.stringify({left:leftWidth.value,right:rightWidth.value,sidebar:showSidebar.value,info:showInformation.value,view:viewMode.value}))}catch{/* settings are optional */}})
 onMounted(async()=>{
+ document.addEventListener('pointerdown',cancelTableSelectionOutside,true)
  document.addEventListener('keydown',shortcuts)
  window.addEventListener('bajiu:main-close',requestQuit)
  if(nativeWindows)void Promise.resolve().then(()=>api.MainWindowReady()).catch(e=>showNavigationError(errorText(e)))
@@ -556,7 +571,7 @@ function nativeDialogAction(key:string,event:DialogAction){
  else if(key==='database'){if(action==='changed')void databaseChanged(payload.operation,payload.name);else if(action==='cancel')closeDatabaseTool()}
 }
 useNativeDialogs(nativeDialogDefinitions,nativeDialogAction,showNavigationError)
-onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shortcuts);window.removeEventListener('bajiu:main-close',requestQuit);releaseDrag?.();transientPasswords.clear()})
+onUnmounted(()=>{document.removeEventListener('pointerdown',cancelTableSelectionOutside,true);clearInterval(poll);document.removeEventListener('keydown',shortcuts);window.removeEventListener('bajiu:main-close',requestQuit);releaseDrag?.();transientPasswords.clear()})
 </script>
 
 <template>
@@ -646,10 +661,11 @@ onUnmounted(()=>{clearInterval(poll);document.removeEventListener('keydown',shor
            <div class="object-search"><Search :size="12"/><input v-model="objectSearch" aria-label="筛选对象" placeholder="筛选"/></div>
           </div>
           <div v-if="objectsError" class="objects-error" role="alert"><AlertCircle :size="15"/>{{objectsError}}<button class="tiny-button" aria-label="关闭错误提示" @click="objectsError=''"><X :size="13"/></button></div>
-          <div class="object-list-scroll" :aria-busy="objectsLoading">
+          <div ref="objectListViewport" class="object-list-scroll" :aria-busy="objectsLoading">
             <table v-if="viewMode==='details'" class="object-table" aria-label="数据库对象列表" :role="selectedDatabase&&category==='tables'?'grid':undefined" :aria-multiselectable="selectedDatabase&&category==='tables'?true:undefined"><thead><tr><th v-for="column in columns" :key="column" :title="column==='行'?'MySQL 提供的估计行数':undefined">{{column}}</th></tr></thead><tbody><tr v-for="row in workspaceRows" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" tabindex="0" :aria-selected="workspaceRowSelected(row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)"><td class="object-name"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="15" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></td><template v-if="selectedDatabase&&(category==='tables'||category==='views')"><td class="numeric">{{row.object?.autoIncrement||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td class="numeric">{{bytesText(row.object?.dataLength??'')}}</td><td>{{row.object?.engine||''}}</td><td class="numeric" title="服务器提供的估计行数">{{row.object?.rows||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selectedDatabase"><td>{{row.object?.engine||''}}</td><td>{{row.object?.modifiedAt||''}}</td><td>{{row.object?.createdAt||''}}</td><td>{{row.object?.comment||''}}</td></template><template v-else-if="selected"><td>数据库</td></template><template v-else><td>{{row.profile?.host}}</td><td>{{row.profile?.port}}</td><td>{{row.profile?.username}}</td><td>{{envName(row.profile?.environment??'')}}</td><td>{{row.profile&&sessions[row.profile.id]?'已打开':'已关闭'}}</td></template></tr></tbody></table>
             <div v-else class="object-icon-grid"><button v-for="row in workspaceRows" :aria-pressed="workspaceRowSelected(row)" @keydown.space.prevent="selectWorkspaceRow(row,$event)" :key="row.key" :data-object-key="row.key" :class="{selected:workspaceRowSelected(row)}" @keydown="objectListKeys($event,row)" @contextmenu.prevent.stop="contextForWorkspaceRow($event,row)" @click="selectWorkspaceRow(row,$event)" @dblclick="openRow(row)" @keydown.enter.prevent="openRow(row)"><component :is="row.kind==='connection'?Plug:row.kind==='database'?Database:row.kind==='tables'?Table2:row.kind==='views'?PanelsTopLeft:Braces" :size="28" :class="row.kind==='database'?databaseIconClass(selectedID,row.database??row.name):'category-'+row.kind"/><span>{{row.name}}</span></button></div>
             <div v-if="objectsLoading" class="object-empty" role="status"><LoaderCircle :size="20" class="spin"/><span>正在读取{{categoryName}}…</span></div><div v-else-if="workspaceRows.length===0" class="object-empty"><span v-if="objectSearch">没有匹配的对象</span><template v-else-if="!selected"><span>{{selectedGroupID?'此组还没有连接，可新建连接或将已有连接移入此组。':'请选择左侧连接，或新建一个 MySQL 连接。'}}</span><button class="link-button" @click="create" :disabled="!!fatalError">新建连接</button></template><span v-else-if="!live">双击左侧连接以打开服务器。</span><span v-else>{{selectedDatabase?'此数据库中没有可见的'+categoryName:'没有可访问的数据库'}}</span></div>
+            <div v-if="objectMarquee" class="object-selection-rectangle" aria-hidden="true" :style="{left:objectMarquee.left+'px',top:objectMarquee.top+'px',width:objectMarquee.width+'px',height:objectMarquee.height+'px'}"></div>
           </div>
           <div class="object-list-status"><span>{{workspaceRows.length}} 个{{scopeName}}<span v-if="truncated">（最多显示 10,000 项，请缩小范围）</span></span><span v-if="selectedDatabase&&category==='tables'">行数为服务器估计值</span></div>
           </div>
