@@ -18,11 +18,16 @@ beforeEach(()=>{
  })} as never}}
 })
 afterEach(()=>{app?.unmount();root.remove();delete window.go;vi.unstubAllGlobals()})
-async function mount(){app=createApp(TableDataEditor,{profile:{...defaults(),id:'qa'},database:'qa',table:'items',section:'data',active:true,connected:true,sessionKey:'qa'});app.mount(root);await settle()}
+async function mount(onDesign=()=>{}){app=createApp(TableDataEditor,{profile:{...defaults(),id:'qa'},database:'qa',table:'items',section:'data',active:true,connected:true,sessionKey:'qa',onDesign});app.mount(root);await settle()}
 it('places save/add/delete first and tabs through writable new cells without writing to the server',async()=>{
  await mount();expect(Array.from(root.querySelectorAll('.table-data-toolbar>button')).slice(0,4).map(button=>button.textContent?.trim())).toEqual(['保存','新增','删除','开始事务'])
  button('新增').click();await settle();expect(document.activeElement?.getAttribute('aria-label')).toBe('id');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('first');edit('draft');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('last');await tab(true);expect(document.activeElement?.getAttribute('aria-label')).toBe('first');await tab();await tab();expect(document.activeElement).toBe(button('保存'));expect(commands.some(sql=>/^\s*(?:INSERT|UPDATE|DELETE)\b/.test(sql))).toBe(false)
 })
 it('keeps the same Tab sequence in form view',async()=>{
  await mount();root.querySelector<HTMLButtonElement>('[aria-label="表单视图"]')!.click();await settle();button('新增').click();await settle();expect(document.activeElement?.getAttribute('aria-label')).toBe('id');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('first');await tab();expect(document.activeElement?.getAttribute('aria-label')).toBe('last');expect(commands.some(sql=>/^\s*(?:INSERT|UPDATE|DELETE)\b/.test(sql))).toBe(false)
+})
+it('opens design from each metadata section immediately before Refresh without writing data',async()=>{
+ const design=vi.fn();await mount(design);expect(root.querySelector('.table-data-toolbar')?.textContent).not.toContain('设计表')
+ for(const label of ['字段','索引','外键','触发器']){button(label).click();await settle();expect(Array.from(root.querySelectorAll('.table-data-toolbar>button')).map(b=>b.textContent?.trim())).toEqual(['设计表','刷新']);button('设计表').click();await settle()}
+ expect(design).toHaveBeenCalledTimes(4);expect(commands.some(sql=>/^\s*(?:INSERT|UPDATE|DELETE|ALTER)\b/.test(sql))).toBe(false)
 })

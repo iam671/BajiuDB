@@ -7,7 +7,7 @@ import {editableQuery,type EditableQuery} from './queryEditing'
 import type {CellValueRequest} from './cellValueTools'
 const props=defineProps<{profile:Profile;database:string;initialSQL:string;active:boolean;connected:boolean;sessionKey?:string}>()
 type Confirmation={title:string;body:string;label:string;action:()=>void|Promise<void>}
-const emit=defineEmits<{dirty:[value:boolean];confirm:[request:Confirmation];'quick-edit':[request:CellValueRequest]}>()
+const emit=defineEmits<{dirty:[value:boolean];confirm:[request:Confirmation];design:[database:string,table:string];'quick-edit':[request:CellValueRequest]}>()
 const sql=ref(props.initialSQL),editor=ref<HTMLTextAreaElement>(),executing=ref(false),starting=ref(false),childBusy=ref(false),childDirty=ref(false),stopping=ref(false),error=ref(''),message=ref(''),result=ref<AdminResult|null>(null)
 const query=shallowRef<EditableQuery>(),queryID=ref(''),tableEditor=ref<InstanceType<typeof TableDataEditor>>()
 const running=computed(()=>executing.value||starting.value||childBusy.value)
@@ -51,7 +51,7 @@ onUnmounted(()=>{disposed=true;if(task)void api.CancelDatabaseTask(task).catch((
   <textarea ref="editor" v-model="sql" class="query-editor-input" aria-label="SQL 编辑器" spellcheck="false" :readonly="running" placeholder="在此输入 SQL，Ctrl+Enter 执行选中内容或全部语句。"/>
   <p v-if="!query" class="query-editor-note">SQL 批次每次执行使用独立会话，批次内事务须在同一次执行中完成。出错即停止，已提交操作不会自动回滚。<template v-if="profile.tunnelMode==='http'">PHP 中转需启用 BAJIU_TUNNEL_ALLOW_SQL=1；停止或关闭标签页只取消客户端等待，服务器可能仍继续执行。</template></p>
   <div class="query-editor-feedback" aria-live="polite"><span v-if="running" role="status"><LoaderCircle :size="13" class="spin"/>正在执行…</span><p v-if="error" class="db-tools-error" role="alert">{{error}}</p><p v-if="message" class="db-tools-message" role="status">{{message}}</p></div>
-  <TableDataEditor v-if="query" ref="tableEditor" :key="queryID" class="query-editable-result" :profile="profile" :database="query.database" :table="query.table" section="data" :query="query" :active="active" :connected="connected" :sessionKey="sessionKey??''" @dirty="childDirty=$event" @busy="childBusy=$event" @query-unavailable="unavailable" @confirm="emit('confirm',$event)" @quick-edit="emit('quick-edit',$event)"/>
+  <TableDataEditor v-if="query" ref="tableEditor" :key="queryID" class="query-editable-result" :profile="profile" :database="query.database" :table="query.table" section="data" :query="query" :active="active" :connected="connected" :sessionKey="sessionKey??''" @dirty="childDirty=$event" @busy="childBusy=$event" @query-unavailable="unavailable" @design="emit('design',query.database,query.table)" @confirm="emit('confirm',$event)" @quick-edit="emit('quick-edit',$event)"/>
   <div v-else class="query-editor-results" :aria-busy="running">
    <section v-for="(r,index) in result?.results??[]" :key="index" class="query-result-set"><h3>结果 {{index+1}}<span v-if="!r.columns.length"> · 影响行数 {{r.affected}}</span><span v-if="r.truncated"> · 仅显示前 1,000 行</span></h3><div v-if="r.columns.length" class="query-result-table"><table><thead><tr><th v-for="(column,i) in r.columns" :key="i">{{column}}</th></tr></thead><tbody><tr v-for="(row,n) in r.rows" :key="n"><td v-for="(value,i) in row" :key="i" :class="{null:value===null}">{{value===null?'NULL':value}}</td></tr></tbody></table></div></section>
    <div v-if="!result&&!running" class="query-editor-empty">查询结果将显示在这里</div>

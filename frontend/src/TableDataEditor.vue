@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref,shallowRef,watch} from 'vue'
-import {Plus,Save,Trash2,RefreshCw,Search,ChevronLeft,ChevronRight,ChevronsLeft,LayoutGrid,List,Undo2,LoaderCircle,Square,Columns3,SlidersHorizontal,PanelRight,GitBranch,Check,RotateCcw,X} from '@lucide/vue'
+import {Plus,Save,Trash2,RefreshCw,Search,ChevronLeft,ChevronRight,ChevronsLeft,LayoutGrid,List,Undo2,LoaderCircle,Square,Columns3,SlidersHorizontal,PanelRight,GitBranch,Check,RotateCcw,X,Pencil} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile,type QueryResult} from './api'
 import {deleteRowSQL,makeDraft,metadataSQL,pageSQL,readColumns,readIndexes,saveRowSQL,uniqueKey,type CellDraft,type TableColumn,type TableFilter,type TableIndex,type TableSection} from './tableEditing'
 import {clampColumnWidth,defaultColumnWidth,readColumnLayout} from './tablePresentation'
@@ -13,7 +13,7 @@ import {cellValueError,type CellValueRequest} from './cellValueTools'
 const instanceID=crypto.randomUUID()
 const props=defineProps<{profile:Profile;database:string;table:string;section:TableSection;active:boolean;connected:boolean;sessionKey:string;query?:EditableQuery}>()
 type Confirmation={title:string;body:string;label:string;action:()=>void|Promise<void>}
-const emit=defineEmits<{confirm:[request:Confirmation];dirty:[value:boolean];section:[value:TableSection];busy:[value:boolean];'query-unavailable':[reason:string];'quick-edit':[request:CellValueRequest]}>()
+const emit=defineEmits<{confirm:[request:Confirmation];dirty:[value:boolean];section:[value:TableSection];busy:[value:boolean];design:[];'query-unavailable':[reason:string];'quick-edit':[request:CellValueRequest]}>()
 class StatementError extends Error{}
 const sections:[TableSection,string][]=[['data','数据'],['fields','字段'],['indexes','索引'],['foreignKeys','外键'],['triggers','触发器']]
 const section=ref<TableSection>(props.section),view=ref<'form'|'grid'>('grid'),running=ref(false),error=ref(''),message=ref(''),columns=ref<TableColumn[]>([]),indexes=ref<TableIndex[]>([]),foreignKeys=ref<QueryResult>(),triggers=ref<QueryResult>(),data=shallowRef<QueryResult>(),page=ref(1),pageInput=ref(1),selectedIndex=ref(-1),original=ref<(string|null)[]>(),draft=ref<CellDraft[]>([]),isNew=ref(false),baseline=ref('[]'),uncertain=ref(false),sessionChanged=ref(false),sort=ref(''),descending=ref(false)
@@ -197,7 +197,7 @@ onUnmounted(()=>{disposed=true;releaseColumnResize?.();window.removeEventListene
  <button class="native-button" @click="toggleCellEditor" :class="{pressed:showCellEditor}" :disabled="!columns.length"><PanelRight :size="13"/>单元格编辑器</button>
  <button class="native-button" @click="showFilters=!showFilters" :class="{pressed:showFilters}"><SlidersHorizontal :size="13"/>筛选 &amp; 排序</button>
  <button class="native-button" @click="showColumns=!showColumns;if(showColumns)showCellEditor=false" :class="{pressed:showColumns}" :disabled="!columns.length"><Columns3 :size="13"/>列</button>
- <button class="native-button" @click="undo" :disabled="running||!dirty"><Undo2 :size="13"/>撤销修改</button></template><button class="native-button" @click="refresh" :disabled="running||!connected"><RefreshCw :size="13"/>刷新</button><button v-if="running" class="native-button" @click="stop"><Square :size="12"/>停止</button></div>
+ <button class="native-button" @click="undo" :disabled="running||!dirty"><Undo2 :size="13"/>撤销修改</button></template><button v-if="section!=='data'" class="native-button" :disabled="running||!connected" @click="emit('design')"><Pencil :size="13"/>设计表</button><button class="native-button" @click="refresh" :disabled="running||!connected"><RefreshCw :size="13"/>刷新</button><button v-if="running" class="native-button" @click="stop"><Square :size="12"/>停止</button></div>
  <div v-if="showColumns&&section==='data'" class="table-column-panel"><div class="table-column-actions"><button class="native-button" @click="allColumns">显示全部列</button><button class="native-button" @click="resetColumnWidth()">恢复默认列宽</button></div><div class="table-column-list"><label v-for="{column} in projectedColumns" :key="column.name"><input type="checkbox" :checked="!hiddenColumns.has(column.name)" :disabled="!hiddenColumns.has(column.name)&&visibleColumns.length===1" @change="toggleColumn(column)"/><span :title="column.name+' · '+column.type">{{column.name}}</span><input type="number" min="72" max="1200" :value="columnWidth(column)" :aria-label="column.name+'列宽'" @change="setColumnWidth(column,$event)"/><span>px</span></label></div></div>
  <p v-if="layoutWarning" class="table-data-notice">{{layoutWarning}}</p>
  <p v-if="!connected" class="table-data-notice">连接已关闭。重新打开“{{profile.name}}”后可继续操作，当前内容保留。</p>
