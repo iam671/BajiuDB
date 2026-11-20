@@ -101,3 +101,5 @@
 .dump-feedback{display:flex;align-items:center;gap:6px}.dump-feedback>span{flex:1;min-width:0;overflow-wrap:anywhere}
 
 .db-tools-model{height:650px}.db-tools-model .db-tools-body{min-width:0;overflow:hidden}.db-tools-model .db-tools-body>:not(.db-model-canvas){flex-shrink:0}
+
+.transfer-source-row{display:flex;align-items:center;gap:8px;flex-shrink:0}.transfer-source-row>.searchable-select{min-width:130px;max-width:380px;flex:1}.table-workflow .db-schema-form>.searchable-select{min-width:0}.table-workflow td>.searchable-select{min-width:140px}

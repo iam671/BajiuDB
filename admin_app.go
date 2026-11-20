@@ -21,20 +21,27 @@ func (a *App) DatabaseAdmin(task, id, database string, request connections.Admin
 	if a.startupErr != nil {
 		return connections.AdminResult{}, a.startupErr
 	}
+	ctx, finish, err := a.adminTaskContext(task)
+	if err != nil {
+		return connections.AdminResult{}, err
+	}
+	defer finish()
+	return a.service.Admin(ctx, id, database, request)
+}
+func (a *App) adminTaskContext(task string) (context.Context, func(), error) {
 	if task == "" || len(task) > 128 {
-		return connections.AdminResult{}, errors.New("操作标识无效")
+		return nil, nil, errors.New("操作标识无效")
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	adminTasks.Lock()
 	if _, exists := adminTasks.cancel[task]; exists {
 		adminTasks.Unlock()
 		cancel()
-		return connections.AdminResult{}, errors.New("操作标识重复")
+		return nil, nil, errors.New("操作标识重复")
 	}
 	adminTasks.cancel[task] = cancel
 	adminTasks.Unlock()
-	defer func() { cancel(); adminTasks.Lock(); delete(adminTasks.cancel, task); adminTasks.Unlock() }()
-	return a.service.Admin(ctx, id, database, request)
+	return ctx, func() { cancel(); adminTasks.Lock(); delete(adminTasks.cancel, task); adminTasks.Unlock() }, nil
 }
 func (a *App) CancelDatabaseTask(task string) {
 	adminTasks.Lock()

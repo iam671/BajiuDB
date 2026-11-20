@@ -18,6 +18,9 @@ export interface AdminResult {results:QueryResult[];completed:number;error:strin
 export interface DialogDetails {title:string;body:string;details:string;sql?:string}
 export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database'|'index-fields'|'cell-value';title:string;width:number;height:number;payload:any;revision?:number}
 export interface DialogAction {id:string;action:string;payload:any}
+export interface TransferFormat {id:string;label:string;available:boolean;note:string}
+export interface TransferData {columns:string[];rows:(string|null)[][]}
+export interface TransferOptions {format:string;path:string;table:string;delimiter:string;connectionString:string;protectFormulas:boolean}
 type Bridge = {
   ListGroups():Promise<ConnectionGroup[]>; SaveGroup(id:string,name:string):Promise<ConnectionGroup>;
   DeleteGroup(id:string):Promise<void>;
@@ -35,6 +38,10 @@ type Bridge = {
   SaveDatabaseReport(name:string,text:string):Promise<string>;
   DumpDatabaseToFile(task:string,id:string,database:string,includeData:boolean):Promise<string>;
   OpenCSVFile():Promise<{path:string;text:string}>;
+  TransferFormats():Promise<TransferFormat[]>;SelectTransferFile(format:string):Promise<string>;
+  InspectTransferSource(task:string,options:TransferOptions):Promise<string[]>;
+  ReadTransferSource(task:string,options:TransferOptions):Promise<TransferData>;
+  SaveTransferData(task:string,options:TransferOptions,data:TransferData):Promise<string>;
   OpenWindowDialog(state:WindowDialog):Promise<void>;GetWindowDialog(id:string):Promise<WindowDialog>;UpdateWindowDialog(state:WindowDialog):Promise<void>;CloseWindowDialog(id:string):Promise<void>;SendWindowDialogAction(action:DialogAction):Promise<void>;
 }
 declare global { interface Window {go?:{main:{App:Bridge}}} }

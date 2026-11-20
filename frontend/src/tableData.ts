@@ -22,11 +22,11 @@ export function parseCSV(source:string):string[][]{
  if(rows.some(r=>r.length!==headers.length))throw new Error('CSV 每行列数必须与标题一致')
  return rows
 }
-export function importSQL(table:string,rows:string[][],mapping:string[]){
+export function importSQL(table:string,rows:(string|null)[][],mapping:string[],legacyNullMarker=true){
  const targets=mapping.map((name,index)=>({name,index})).filter(c=>c.name)
  if(!targets.length||new Set(targets.map(c=>c.name)).size!==targets.length)throw new Error('请映射至少一个字段，同一字段不能重复映射')
  const commands=['START TRANSACTION;']
- for(let start=1;start<rows.length;start+=100){commands.push('INSERT INTO '+quoteIdentifier(table)+' ('+targets.map(c=>quoteIdentifier(c.name)).join(', ')+') VALUES\n'+rows.slice(start,start+100).map(row=>'('+targets.map(c=>row[c.index]==='\\N'?'NULL':sqlText(row[c.index]??'')).join(', ')+')').join(',\n')+';')}
+ for(let start=1;start<rows.length;start+=100){commands.push('INSERT INTO '+quoteIdentifier(table)+' ('+targets.map(c=>quoteIdentifier(c.name)).join(', ')+') VALUES\n'+rows.slice(start,start+100).map(row=>'('+targets.map(c=>row[c.index]===null||(legacyNullMarker&&row[c.index]==='\\N')?'NULL':sqlText(row[c.index]??'')).join(', ')+')').join(',\n')+';')}
  commands.push('COMMIT;');const sql=commands.join('\n');if(sql.length>8*1024*1024)throw new Error('生成的 SQL 超过 8 MB，请拆分 CSV 文件');return sql
 }
 export function csvText(result:QueryResult,protectFormulas=true){

@@ -1,6 +1,7 @@
 import {describe,expect,it} from 'vitest'
 import {csvText,generatedSQL,importSQL,parseCSV,quoteIdentifier,suggestedExpression} from './tableData'
 describe('table data transformations',()=>{
+ it('keeps typed NULL distinct from a literal backslash-N for native file imports',()=>{const sql=importSQL('qa',[['value'],[null],['\\N']],['value'],false);expect(sql).toContain('(NULL)');expect(sql).toContain("CONVERT(X'5c4e' USING utf8mb4)")})
  it('parses UTF-8 BOM, CRLF, quoted commas, escaped quotes and embedded newlines without changing large numbers',()=>{
   expect(parseCSV('\uFEFFid,name,note\r\n9007199254740993,"张三,李四","a""b\nnext"\r\n')).toEqual([['id','name','note'],['9007199254740993','张三,李四','a"b\nnext']])
  })
