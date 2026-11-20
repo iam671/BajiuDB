@@ -48,7 +48,7 @@ onMounted(async()=>{
 onUnmounted(()=>{if(task)void api.CancelDatabaseTask(task)})
 </script>
 <template>
- <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode),'db-tools-drop':mode==='drop'}" role="dialog" aria-modal="true" :aria-label="names[mode]">
+ <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode),'db-tools-drop':mode==='drop','db-tools-model':mode==='model'}" role="dialog" aria-modal="true" :aria-label="names[mode]">
   <header><Database :size="16"/><h2>{{names[mode]}} · {{profile.name}}<template v-if="mode!=='create'"> / {{database}}</template></h2><button class="tiny-button" aria-label="关闭数据库工具" @click="close"><X :size="17"/></button></header>
   <TableWorkflows v-if="workflowMode" ref="workflow" :profile="profile" :database="database" :table="table" :mode="workflowMode" @close="emit('close')" @changed="(operation,name)=>emit('changed',operation,name)"/>
   <div v-else class="db-tools-body">
