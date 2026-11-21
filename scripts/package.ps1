@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Path $release -Force | Out-Null
 try {
     $exe = Join-Path $projectDir 'build/bin/BajiuDB-package.exe'
     Copy-Item -LiteralPath $exe -Destination (Join-Path $release 'BajiuDB.exe')
-    foreach ($file in @('README.md', 'VALIDATION.md', 'design-qa.md', 'docs', 'THIRD_PARTY_NOTICES.md', 'licenses', 'third_party_sources', 'tunnel')) {
+    foreach ($file in @('README.md', 'README.zh-CN.md', 'LICENSE', 'VALIDATION.md', 'design-qa.md', 'docs', 'THIRD_PARTY_NOTICES.md', 'licenses', 'third_party_sources', 'tunnel')) {
         Copy-Item -LiteralPath (Join-Path $projectDir $file) -Destination $release -Recurse
     }
     $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -1,196 +1,124 @@
+<div align="center">
+
 # Bajiu DB · 捌玖
 
-基于 Go + Wails 3 + Vue 3 的跨平台数据库桌面工具。当前版本为 **0.0.1：多数据库连接与 MySQL 管理工具**。
+**A lightweight database manager for your desktop.**
 
-## 已实现
+Connections, queries, table design and data editing in one workspace.<br/>
+Built with Go + Wails + Vue and the system WebView.
 
-- 支持 Redis、MySQL、PostgreSQL、SQL Server、Oracle、SQLite、MariaDB、MongoDB 的真实连接驱动。新建连接可选类型、测试/保存/打开，旧配置默认 MySQL；新增类型提供对象浏览及原生查询，MySQL/MariaDB 保留已有管理功能。[连接配置和支持范围](docs/database-engines.md)。
+**English** · [简体中文](README.zh-CN.md)
 
-- 导入/导出向导支持 TXT、CSV、JSON、XML、XLS、XLSX、MDB、ACCDB、ODBC、DBF、SQLite DB，提供可搜索格式选择、来源表/工作表、字段映射与导入 SQL 预览。XLS/Access/DBF 需要本机 Windows 64 位 ACE，ODBC 需要对应驱动；六种内置格式可跨平台使用。[格式和限制](docs/data-transfer.md)。
+[GitHub](https://github.com/iam671/BajiuDB) · [Gitee](https://gitee.com/sixeventy-one/bajiu-db) · [Documentation](docs/README.md) · [Report an issue](https://github.com/iam671/BajiuDB/issues) · [Support development](#support-development)
 
-- 逆向数据库到模型的画布随窗口大小伸缩，最大化后占满剩余区域，保留画布缩放、滚动及 SVG 导出。
+![Version](https://img.shields.io/badge/version-0.0.1-1685d1)
+[![License](https://img.shields.io/badge/license-Apache--2.0-2b8a57)](LICENSE)
+![Stack](https://img.shields.io/badge/Go-Wails-Vue-475569)
 
-- 数据字典各表完整展开，表头随表格滚动、不固定；不显示每表独立滚动条，统一使用窗口内容区的总滚动条。
+</div>
 
-- 数据库右键菜单分为打开/关闭、库管理、新建查询、工具及刷新五组；连接、分组、表和单元格菜单也按用途分隔。转储 SQL 文件提供“结构和数据...”及“仅结构...”两个子菜单，点击后直接打开系统“另存为”，默认“数据库名.sql”，可编辑文件名和保存位置，无转储设置窗口；取消不读取数据库，按选定名称保存，不附加随机后缀，完成后在主窗口显示保存路径。
+## Why Bajiu DB?
 
-- 对象表空白处右键提供新建表、导入/导出向导、数据字典、数据生成、运行 SQL 文件、在数据库中查找和刷新；查找聚焦当前库的对象筛选框。关闭数据库同时关闭该连接/库的全部表、设计、查询、命令行 Tab，有未保存内容或事务时先统一确认，取消保留；其他库与服务器连接保持。
+Bajiu DB is an open-source desktop database manager focused on everyday work: organize connections, inspect schemas, run queries and edit data without a heavy desktop shell. It uses a Go backend and the operating system's WebView, so the application does not bundle a separate browser engine.
 
-- 表列表和图标可用鼠标按住拖动框选，靠近边缘自动滚动；Ctrl/Command 框选切换选择，Shift 框选追加。点击空白或其它区域取消选择，表操作按钮和菜单保留选择；Esc 可取消当前框选。
+- **A compact desktop app.** The current Windows x64 ZIP is about 19 MB (decimal); the executable is about 57 MB. WebView2 is a separate runtime. Sizes vary with each build; no memory or speed benchmark is claimed.
+- **Eight database engines.** Keep SQL databases, Redis and MongoDB connections in one tree, with recognizable engine icons and connection status.
+- **A familiar workspace.** Connection groups on the left, closable working tabs in the center, and object information and DDL on the right.
+- **Local configuration.** Save passwords in the system credential store. The application has no built-in cloud synchronization, telemetry or automatic updates.
 
-- 对象页表列表支持 Ctrl/Command 多选、Shift 连选及 Ctrl/Command+A 全选；点击“删除表”、按 Delete 或使用列表右键“删除表”可批量删除。确认窗口列出数据库及完整表名，取消不操作；筛选/切库/刷新清除选择，报错后刷新核对实际结果。
+Current version: **0.0.1**. The interface is currently in Simplified Chinese. Documentation is available in English and Chinese. Windows x64 is the currently packaged platform; macOS/Linux desktop builds and runtime behavior still need validation.
 
-- 命令行界面改为主窗口内可关闭 Tab，使用 `mysql>` 行输入，默认使用打开时选中的数据库；输入/历史/结果在切换标签后保留，未执行内容关闭前会提示。
+## Features
 
-- 左侧表单击/右键保留当前工作页，双击再打开表；字段、索引、外键、触发器页在“刷新”前提供“设计表”，打开当前页面对应表的设计标签。
+### Connections and browsing
 
-- 单元格双击编辑后，可点击右侧“…”快捷输入：DATE 日历，DATETIME/TIMESTAMP 日期和时间（保留小数秒），TIME/YEAR 当前时间/年份，ENUM 搜索选择、SET 多选，数值精确加减、JSON 校验格式化、HEX 和完整文本编辑。确认只改草稿，仍需点击保存；今天/当前时间取本机时间，可手动调整。
-- 数据库右键“新建查询”的单表 SELECT 结果支持同样的双击编辑、保存、删除及事务操作。支持直接字段及别名、WHERE、简单排序、LIMIT/OFFSET，按每页 1,000 条显示；即使未选择唯一键，也会隐藏读取实际键与完整快照来定位记录。联表、聚合、表达式或无法确定来源的结果保持只读；新增记录请打开源表。重新执行/关闭查询会保护尚未保存的结果和事务。
+Choose a database type before entering connection settings. Test, save, duplicate, open and close connections; organize them in groups and drag connections between groups. Browse available databases, schemas and objects with engine-specific queries. MySQL/MariaDB also support verified TLS, SSH tunnels and the bundled website URL/PHP tunnel.
 
-- 主窗口关闭或文件菜单退出前检查未保存的设计、记录、事务及查询/连接修改；取消退出保留草稿。
-- 新表保存遇到同名表时，再次保存可重新输入表名，不丢失字段设计，也不覆盖已有表。
-- 新字段按常见名称建议类型与长度（如 user_id → BIGINT(20)、price → DECIMAL(18,2)、created_at → DATETIME）；手动改过或已有字段保持原设置。
-- 数据操作栏前三项为保存、新增、删除；新增记录支持 Tab/Shift+Tab 连续填写字段，末项后聚焦保存，仍由用户显式保存写库。
+### Queries and data editing
 
-- 新建、编辑、删除和复制连接配置。
-- 新建/编辑数据库的字符集、排序规则可直接输入、搜索和下拉选择，支持方向键、Enter 和 Esc；选项来自当前服务器，保存前由服务器校验。
-- 删除数据库使用 420×320 的独立系统窗口，固定底部操作区，不显示最小化、最大化和全屏按钮，仍需输入准确库名确认。
-- 左侧“表”等分类可双击或点击箭头展开/收缩对象列表；表可继续展开字段名、类型和主键标记。单击表提供 DDL 标签，仍由用户手动切换。
-- 左侧“表”分类、表项及中间表列表均有右键菜单：新建表、导入向导、导出向导、数据字典、数据生成、运行 SQL 文件、在数据库中查询、刷新。新建表支持字段/约束 SQL 及完整预览；表上打开查询会预填带 LIMIT 的 SELECT。
-- 文件导入最多 64 MB，解码内容最多 8 MB / 10,000 行 / 200,000 单元格，超限停止；首行为字段名的 TXT/CSV/Excel 可映射到已有 MySQL 表，只追加，不覆盖。排除自增/生成字段，预览后才写入。
-- 导出全部记录，不设应用总行数/总文件大小上限，后台逐行读取并写入，可停止；二进制/BIT 使用 0xHEX，空间字段使用 WKB 和 SRID，导入对应类型可还原，完整备份使用“转储 SQL 文件”。CSV/TXT 可选公式防护，XLSX 使用文本单元格并在工作表满时自动分表；文件按所选真实格式编码并暂存成功后保存。ODBC 只新建目标表；DBF 导出限短 ASCII 字段名、系统代码页文本且无 NULL，超出条件明确停止。
-- 数据生成可选择字段、编辑 SQL 表达式、指定行数和起始序号，预览后确认追加，单次最多 1,000 行；自增和生成列不参与写入，外键/唯一键等约束仍由 MySQL 检查。
-- 右键“我的连接”可新建连接、新建组、关闭所有连接。右键已有连接选择“移至分组…”可调整归属，也可移回未分组；在组上右键可新建组内连接或重命名组。
-- 自定义分组与连接配置一起保存，空组及连接归属重启后保留。环境标签与自定义分组分别管理。
-- 连接可直接拖入分组，也可拖到“我的连接”、左侧空白处或拖拽时显示的“移回我的连接”区域来移出分组。保存失败时保留原归属；拖拽不会关闭会话或清空当前对象列表。
-- 不显示底部 Toast；成功操作直接反映在界面状态中，错误在操作位置或左侧导航中显示。
-- 新建组、重命名组直接在左侧树中输入，Enter 保存、Esc 取消，也可点击其他位置提交；保存失败会保留输入并就地提示。右键组选择“删除组”，确认后组内连接移回“我的连接”，配置、密码和已打开的会话保留。
-- 菜单与大图标工具栏、左侧连接树、中间对象列表、右侧信息窗格及底部状态栏。
-- 双击左侧或中间列表中的表，在主窗口打开可关闭的表数据标签；左侧表节点下显示字段、索引、外键、触发器，可点击查看实际结构。
-- 表数据页提供开始事务、单元格编辑器、筛选 & 排序和列操作。直连/SSH 的 InnoDB 表可在独立会话中开始、提交、回滚事务，事务内保存后需提交；关闭表或连接会请求回滚。事务空闲 10 分钟自动回滚，每个连接最多 8 个表事务。PHP 中转仍为每请求独立会话，暂不支持跨请求事务。
-- 列宽根据字段类型初始化，可拖动表头分隔线调整；按连接/数据库/表缓存列宽及显示状态，关闭后重进仍保留。列面板可隐藏/显示列和恢复默认宽度；网格长内容单行截断，不改变原值，数据网格保留横向/纵向滚动条，单元格内不显示滚动条。整数和其他数值类型默认列宽 100 px，其他类型默认 150 px，已手动保存的列宽保持不变；可通过“列 → 恢复默认列宽”应用新的默认值。完整文本可通过单元格编辑器查看和编辑。
-- 单元格右键支持复制完整单元格值，以及复制为当前记录的 Insert/Update 语句、按可见列生成的制表符数据/字段名/字段名和数据。生成 SQL 不自动执行，UPDATE 使用原始非空唯一键及 LIMIT 1 定位；没有可用键或新增记录时该项不可用，非空空间字段暂不生成 SQL。引号、二进制、BIT 和大数按类型处理。
-- 表设计保存不弹确认；删除字段、索引、外键和触发器先确认；“键”列整格可切换主键，取消主键无需确认，即使该项尚未保存。字符集和排序规则在下方属性区独立设置，设计器下拉使用与新建数据库相同的输入搜索组件。新表默认跟随数据库，已有表与字段保留真实设置；注释可多行编辑，网格下方属性区可上下拖动调整高度并记忆，最小 30px；各属性固定分行，超出内容滚动查看，不因区域高度变化重排。
-- 对象列表、结构网格、查询结果及原生工具窗口中的表格支持拖动列宽；把手可用方向键微调，双击恢复默认，列宽保存在本机布局缓存。数据网格继续使用原有按连接/库/表保存的列布局。
-- 表设计器使用工具栏 + 字段网格 + 下方属性区：支持添加/插入/删除字段、主键、上移/下移、字段默认值与生成列。下方属性随字段类型切换：数字显示自动递增、无符号与填充零；文本显示字符集、排序规则；TIMESTAMP/DATETIME 提供根据当前时间戳更新；所有类型保留注释。默认值可直接输入，下拉按类型提供预设（文本 EMPTY STRING/NULL、数字 NULL、TIMESTAMP/DATETIME NULL/CURRENT_TIMESTAMP），清空输入表示无显式默认值；普通输入按值处理，CURRENT_TIMESTAMP 或括号包裹的 SQL 表达式按表达式处理，字面量 NULL 等保留词可用单引号输入。新建表可在“选项”填写表名，未填写时保存会弹出名称输入框，确认后继续创建；修改现有表仅生成差异 ALTER。保存保留当前分类标签；校验/SQL 错误弹出详细信息窗口。检测到服务器真实结构变化时自动加载最新结构并停止旧 SQL 保存，可查看刷新前草稿 SQL；仅自增序号变化不会误报结构冲突。索引字段可通过右侧按钮打开选择器，勾选字段、设置子部分长度与 ASC/DESC、上下调整顺序，确定后回填，取消保留原值；字段文本仍可直接编辑。索引、外键、触发器、选项和表注释均可编辑，SQL 预览只读并可复制。字段重命名同步维护设计中的索引与外键引用。
-- 设计标签独立保留草稿；关闭未保存设计需要确认，保存后停留原标签并刷新对象列表。执行前核对服务器结构，检测外部变更后要求重新加载。DDL 及触发器修改可能隐式提交或分步执行，已完成语句不能自动回滚，部分失败或结果不确定时必须重新加载核对；不支持直接重命名整张表。复杂属性保留原定义，无法安全编辑的高级表达式会明确报错，可改用查询编辑器。
-- 数据网格使用固定行高的虚拟滚动，仅渲染可见记录及上下缓冲；滚动事件按动画帧合并，降低大量单元格的渲染开销。保留整个网格的横向/纵向滚动条。网格长文本限制显示量，双击编辑和右键复制始终使用完整内容；编辑框支持原生鼠标拖选横向滚动、横向滚轮和 Shift + 滚轮，内部不显示滚动条。
-- 表数据默认网格视图，可通过分页数据后方的两个图标切换表单/网格，悬停显示名称；支持按字段和条件查询、排序、每页 1,000 条、翻页/跳页，以及记录级新增、保存、删除、撤销修改。写入前按主键或非空唯一键定位并比较读取时的整行快照，避免覆盖已变化的记录。没有这类键时，已有记录只读，仍可新增。
-- 数据单击仅选中，双击具体单元格才编辑该单元格，表单视图也遵循此规则；不显示“值”类型下拉。数据单元格右键可设置空白字符串、NULL、生成 UUID 或刷新；新增时未填写的默认字段仍交由数据库处理，Enter 结束编辑、Shift+Enter 换行、Esc 撤销本次单元格编辑，最后点击“保存”才写入数据库。数据编辑明确区分值、NULL 和新增时的数据库默认值；大整数/小数保持文本精度，二进制与 BIT 使用 HEX，生成列和空间列只读。切换记录、查询/翻页或关闭表标签前会确认放弃未保存修改；会话改变后需刷新再编辑。每页受原有 8 MB 结果大小上限约束。
-- 对象工具栏随选择切换：连接使用原有连接操作；数据库、对象分类及表项统一显示打开表、设计表、新建表、删除表、导入向导、导出向导。打开/设计/删除仅在选中表时启用。打开表使用主窗口内数据标签，每页 1,000 行；新建表与设计表在主窗口打开可关闭的结构化设计标签，编辑字段、主键、索引、外键、触发器、表选项及注释，并预览生成的 CREATE/ALTER SQL；删除表先确认。
-- 左右窗格可拖动、可用方向键调整宽度；支持隐藏信息窗格、详细信息/图标视图及本机布局记忆。
-- 独立系统连接窗口，含常规、高级、数据库、SSL、SSH、HTTP 分页；可拖出主窗口，支持键盘焦点约束和未保存确认。
-- 名称与主机搜索，按本地、开发、测试、生产分组。
-- 测试真实 MySQL 登录与数据库访问，显示服务器版本及连接耗时。
-- 打开、断开连接，读取和刷新当前账户可访问的数据库列表。
-- 浏览数据库中的表、视图、存储过程/函数、事件元数据，并显示所选对象的详细信息。
-- 连接与数据库节点仅在可展开时显示箭头；数据库成功打开前为灰色，成功读取对象列表后为绿色，断开连接时重置。
-- 可选默认数据库、5–30 秒超时，以及验证服务器证书的 TLS 模式。
-- 可选 CA 证书和证书主机名；不提供跳过证书验证的模式。
-- 本地保存配置，MySQL 密码、SSH 密码/私钥口令和 HTTP 令牌使用操作系统凭据库保存；私钥文件仍由用户管理。
-- 复制配置不会复制密码；关闭连接弹窗时提示未保存的修改。
-- 配置损坏时保留原文件，并停止保存操作。
+- Closable query tabs preserve their own SQL, results and database context.
+- MySQL/MariaDB table tabs support grid/form views, filtering, sorting, column visibility, remembered column widths and virtualized rows, with 1,000 records per page.
+- Double-click a cell to edit it. Changes stay in a draft until **Save**. Copy values or generate INSERT/UPDATE and tab-separated text.
+- Date/time pickers, ENUM/SET choices, precise numeric operations and JSON/HEX editors help enter typed values.
+- Eligible direct single-table SELECT results can reuse the table editor. Existing-row updates require a usable non-null unique key; ambiguous query results remain read-only.
+- Dedicated table transactions are available for eligible InnoDB tables over direct/SSH connections. Query batches and the SQL console do not maintain a session between submissions.
 
-支持数据库右键工具、SQL 查询/执行、SQL 命令行、文件运行与转储、数据字典和模型。已支持表数据表单/网格编辑，尚未提供自动数据库迁移。支持 SSH 密码/私钥隧道，以及配套 PHP 脚本的网站 URL 中转，部署说明见 `tunnel/README.md`。
+### Schema and data tools
 
-## Windows 运行
+For MySQL/MariaDB: create and edit tables, fields, indexes, foreign keys, triggers, comments and options; inspect generated SQL; manage databases; run SQL files; dump structure with or without data; generate data dictionaries and SVG models from declared keys.
 
-打开 `build/bin/BajiuDB.exe`，或解压发布 ZIP 后打开 `BajiuDB.exe`。
+Import/export wizards support **TXT, CSV, JSON, XML, XLS, XLSX, MDB, ACCDB, ODBC, DBF and SQLite DB**. Export streams records in the backend without an application-wide total row/file-size cap. Import has separate preview and size limits; some formats need Windows drivers. See [format requirements](docs/data-transfer.md).
 
-程序使用系统 WebView2。此依赖不包含在便携 ZIP 中；本机没有运行时时，需要安装 Microsoft WebView2 Runtime。Go 和 Node.js 只在开发时需要，用户运行程序时不需要安装。
+## Supported databases
 
-点击工具栏“连接”打开新建连接弹窗，填写名称、主机、端口和 MySQL 账户，点击“测试连接”，再点击“确定”保存。双击左侧连接打开服务器，未打开的数据库单击只显示信息，双击或右键“打开数据库”后才读取表列表并展开分类；已打开的数据库双击展开/收起，单击返回其表列表。单击连接可返回数据库列表。单击中间对象可查看右侧详细信息。MySQL 账户与操作系统账户分别管理，Bajiu DB 不会创建数据库账户。
+| Database | Current capabilities |
+| --- | --- |
+| MySQL | Connection management, browsing, queries, data editing, table design, transactions, SQL dump and transfer tools |
+| MariaDB | MySQL-compatible management workflow; advanced syntax depends on the server version |
+| PostgreSQL | Connections, database/schema browsing, tables/views and native SQL |
+| SQL Server | SQL authentication, database/object browsing and native T-SQL |
+| Oracle | Service Name connections, visible schemas/objects and native SQL |
+| SQLite | Open an existing database file, browse objects and run SQL |
+| Redis | Logical databases, key scanning/type inspection and JSON-array commands |
+| MongoDB | Authentication databases, collection browsing and JSON/Extended JSON commands |
 
-密码可以不保存，保存配置时输入的密码只留在本次进程内存中，重启后需要重新输入。编辑已有连接时，密码栏留空表示继续使用已存密码。移除已存密码后，需要保存配置才会生效。
+PostgreSQL, SQL Server, Oracle, SQLite, Redis and MongoDB currently display query results read-only. Native SQL/commands may still write according to server permissions. They do not yet expose the MySQL-specific table designer, transfer or transaction tools. See the [engine guide](docs/database-engines.md) for connection options and validation status.
 
-保存已有连接的修改会断开该连接的旧会话。数据库列表由连接时或手动刷新时读取；保持一个会话不代表持续监测服务器可达性，刷新列表可以再次验证。
+## Download and get started
 
-对象浏览只读取元数据，不自动读取表内容。单击表就会显示 DDL 标签，由用户手动切换后读取真实 `SHOW CREATE TABLE` DDL，双击表不会自动切换。复制表定义成功后，按钮文字后显示绿色 SVG 完成动画；失败则就地提示并允许重试。库节点的收起状态不影响对象列表，刷新或较晚完成的读取不会重新展开已收起的节点。表行数是服务器估计值；视图部分字段可能为空。每次最多列出 10,000 个对象，超出时会提示。备份调度、账户管理、自动运行和图表功能仍为禁用状态。
+- [GitHub releases](https://github.com/iam671/BajiuDB/releases)
+- [Gitee releases](https://gitee.com/sixeventy-one/bajiu-db/releases)
 
-## 数据库右键工具
+If no binary is attached to a release, [build from source](docs/development.md). The expected Windows archive name is `BajiuDB-0.0.1-windows-x64.zip`.
 
-左侧库节点及中间数据库列表支持：打开/关闭数据库、编辑数据库、新建数据库、删除数据库、新建查询、命令行界面、运行 SQL 文件、转储 SQL 文件、数据字典、逆向数据库到模型、刷新。打开/关闭按状态只显示其中一个。关闭库清理客户端浏览状态，保留连接配置及服务器会话。
+1. Extract the Windows package and launch `BajiuDB.exe`. Install Microsoft WebView2 Runtime if it is missing.
+2. Select **连接 (Connection)**, choose a database engine, then enter its connection settings.
+3. Test and save the connection, then open it. SQLite requires an existing database file.
+4. Double-click a database/object to browse it. MySQL/MariaDB tables open in editable tabs; other engines use native query previews.
 
-- **编辑/新建**：读取服务器支持的字符集及排序规则；编辑调整库的默认值，不重命名库、不转换已有表。规则依据 [MySQL ALTER DATABASE](https://dev.mysql.com/doc/refman/8.0/en/alter-database.html)。删除库必须输入准确库名确认；管理窗口拒绝修改或删除系统库。
-- **新建查询**：在主窗口“对象”后增加查询标签页，支持多个查询及 × 单独关闭。切换页保留各自 SQL 和结果，每页绑定创建时的连接和数据库；关闭查询页会请求停止该页任务。可执行选中部分或全部 SQL，支持 Ctrl+Enter。每条结果最多显示 1,000 行，每批最多显示 100 个结果，超过会明确提示；单条结果最多 8 MB，批次结果累计最多 16 MB。NULL 与大整数保持原值。存储过程有多组结果时当前展示第一组，后续组会被消费以便继续执行。
-- **命令行界面**：主窗口内 SQL 命令行标签，默认使用打开时选中的库。分号结束后 Enter 执行，Ctrl+Enter 直接执行，Shift+Enter 换行，↑/↓ 历史、Ctrl+C 停止、Ctrl+L 清屏，支持 help、clear、exit 和单独 USE / \u 切换该标签默认库。历史仅保存在内存中，结果有显示上限及缩略提示。结果行数后显示请求总耗时（秒，保留两位小数，含通信）；多语句显示批次总耗时。每次提交使用独立会话，不是系统 shell；事务和会话变量须在同一次提交中使用，未提交事务随会话关闭回滚。
-- **运行 SQL 文件**：先选择并预览 UTF-8 文件，再执行；最多 8 MB、10,000 条语句，支持引号、注释和 DELIMITER。出错停止并报告已完成条数，已提交操作不会自动回滚；不支持 mysql 客户端的 source 等外部命令或依赖 NO_BACKSLASH_ESCAPES 的脚本。
-- **转储 SQL 文件**：导出表、视图及可选表数据，保存前完整生成，失败不保存半份文件。InnoDB 使用一致性快照；并发 DDL 和非事务表不保证一致。不包含触发器、存储过程、函数和事件；不是完整服务器备份。直连/SSH 文件上限 64 MB，PHP 中转约 48 MB 且受网站超时限制。恢复到同名空库，保留的视图 DEFINER 等可能需要相应权限。
-- **数据字典/模型**：读取真实表、列、主键、外键元数据；字典可导出 HTML，模型支持缩放和 SVG 保存，最多显示 200 个表/视图。不推测未声明的关系。
+Read the [installation guide](docs/installation.md) and [user guide](docs/user-guide.md) for details.
 
-直连和 SSH 支持取消正在执行的 SQL；PHP 中转停止仅取消客户端等待，服务端可能继续执行。所有操作仍受 MySQL 账户权限限制。不要将系统账户权限较高等同于数据库账户权限较高。
+## Build from source
 
-连接菜单按状态只显示“打开连接”或“关闭连接”。双击已打开的连接展开/收起。连接、需弹出的数据库工具、移至分组、确认及关于窗口均为独立系统窗口（新建查询使用主窗口内标签页），可通过系统标题栏拖到主窗口外显示，不受主界面边界裁切。Alt+Home 可将当前应用弹窗在所在屏幕居中。标题栏双击遵循系统窗口行为。
-
-窗口间共享同一个 Go 后端及已打开的会话；未保存连接的关闭确认也使用独立窗口。父窗口在模态操作期间暂时不可交互，子窗关闭后恢复；关闭主程序会退出所有子窗口并取消后台任务。浏览器预览中的弹窗仅用于开发，不代表原生窗口位置。
-
-## 数据位置
-
-配置位于 `os.UserConfigDir()/BajiuDB/connections.json`：
-
-- Windows：`%APPDATA%/BajiuDB/connections.json`
-- macOS：`~/Library/Application Support/BajiuDB/connections.json`
-- Linux：`$XDG_CONFIG_HOME/BajiuDB/connections.json`，未设置时通常为 `~/.config/BajiuDB/connections.json`
-
-配置中只包含连接参数和凭据引用，不包含明文密码。凭据服务名为 `BajiuDB.connections`；Windows 使用 Credential Manager，macOS 使用 Keychain，Linux 使用 Secret Service。系统凭据库不可用时可以不记住密码，不会退回明文存储。配置文件可以备份，但密码不会随 JSON 文件跨机器迁移。
-
-应用不提供云同步、遥测或自动更新功能。
-
-## 开发与构建
-
-当前锁定 Wails **v3.1.0**、前端 `@wailsio/runtime` **3.1.0**、Go 工具链 **1.26.11**，使用 Node.js **22.20.0**。Go 可按 go.mod 自动下载项目工具链；产品运行时不需要 Go。Go 模块与 npm 依赖均有锁文件。本次按官方 [v2 → v3 迁移说明](https://v3.wails.io/migration/v2-to-v3/)迁移了窗口与方法桥接，配置格式和系统凭据服务名保持不变。
+Use Go **1.26.11**, Node.js **22.20.0** and the native dependencies for Wails **3.1.0** on your OS.
 
 ```sh
-cd frontend
-npm ci
-npm run build
-cd ..
+git clone https://github.com/iam671/BajiuDB.git
+# Alternative: git clone https://gitee.com/sixeventy-one/bajiu-db.git
+cd BajiuDB
+npm ci --prefix frontend
+npm run build --prefix frontend
 go run .
 ```
 
-生产构建：
+For a Gitee clone, enter the `bajiu-db` directory instead. On Windows, `./scripts/build.ps1` builds the EXE and `./scripts/package.ps1` creates the portable release, checksums and bundled documentation. These scripts do not require the Wails CLI. See [development and contribution](docs/development.md) for checks and platform notes.
 
-```sh
-go build -tags production -trimpath -ldflags "-s -w"
-```
+## Documentation
 
-Windows 使用 `scripts/build.ps1`：安装并编译前端，通过 `tools/resourcegen` 生成图标、版本与 manifest，再以 Go 编译生产 EXE，无需安装 Wails CLI。`wails.json` 保留项目名称和发布版本元数据，构建以该脚本为准。
+All project guides are versioned Markdown files in this repository. No external document workspace is required.
 
-产品版本保持 **0.0.1**，仅在项目所有者明确要求升级时修改。关于窗口直接读取前端包版本；构建前会检查 Wails、前端包及锁文件的版本一致性。
+| Topic | English | 简体中文 |
+| --- | --- | --- |
+| Documentation index | [Read](docs/README.md) | [阅读](docs/README.zh-CN.md) |
+| Installation and configuration | [Read](docs/installation.md) | [阅读](docs/installation.zh-CN.md) |
+| Everyday usage | [Read](docs/user-guide.md) | [阅读](docs/user-guide.zh-CN.md) |
+| Database engines and current scope | [Read](docs/database-engines.md) | [阅读](docs/database-engines.zh-CN.md) |
+| Import/export formats | [Read](docs/data-transfer.md) | [阅读](docs/data-transfer.zh-CN.md) |
+| SSH and PHP tunnels | [Read](tunnel/README.md) | [阅读](tunnel/README.zh-CN.md) |
+| Development and contribution | [Read](docs/development.md) | [阅读](docs/development.zh-CN.md) |
 
-Windows 便携包运行 `./scripts/package.ps1`，固定输出到 `dist/BajiuDB-0.0.1-windows-x64/`、同名 `.zip` 和 `.sha256`。新包构建和哈希校验成功后覆盖同版本旧包，只保留最新一份；不同正式版本不自动清理。
+## Contribute and give feedback
 
-若旧程序正从 `build/bin/BajiuDB.exe` 运行，打包会保留旧窗口，避免丢失未保存的表单；新程序仍会更新到 `dist`。关闭旧窗口后从发布目录打开新版。
+Bug reports, reproducible examples, documentation improvements and focused pull requests are welcome on [GitHub](https://github.com/iam671/BajiuDB/issues) or [Gitee](https://gitee.com/sixeventy-one/bajiu-db/issues). Include your OS, application version, engine/server version and reproduction steps. Remove credentials and private data from screenshots, logs and SQL examples. Please keep one issue per report and one focused change per pull request, targeting `main`.
 
-Windows、macOS 和 Linux 分别在相应平台上构建，macOS/Linux 的系统开发依赖按 Wails 3 当前平台说明安装；旧版 Wails 2 的构建标签不再适用。密码保存依赖该系统可用的凭据服务。macOS/Linux 尚未在本次环境中实际构建或运行，原生窗口移出和交互本次仅在 Windows 验证。
+## Support development
 
-## 验证
+If Bajiu DB helps your work, a star, useful bug report or optional donation supports continued development. Scan with the matching payment app; click an image to open the original.
 
-```sh
-go test ./...
-go vet ./...
-cd frontend
-npm test
-npm run build
-npm audit
-```
+| Alipay | WeChat Pay |
+| :---: | :---: |
+| <a href="docs/assets/alipay.jpg"><img src="docs/assets/alipay.jpg" alt="Alipay donation QR code" width="260"/></a> | <a href="docs/assets/wechat-pay.jpg"><img src="docs/assets/wechat-pay.jpg" alt="WeChat Pay donation QR code" width="260"/></a> |
 
-可选集成测试使用调用者提供的独立 MySQL 测试实例，不读取本机已有应用的账户或密码。测试服务器需含 `bajiu_test_db` 数据库、`customers` 表及 `active_customers` 视图，使用不受信任的测试证书，并为测试账户授予该数据库的读取权限。以下 SQL 仅在专用测试库执行：
+## License
 
-```sql
-CREATE DATABASE IF NOT EXISTS bajiu_test_db;
-CREATE TABLE IF NOT EXISTS bajiu_test_db.customers (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(80) NOT NULL,
-  active BOOLEAN NOT NULL DEFAULT TRUE
-) ENGINE=InnoDB COMMENT='客户资料';
-CREATE OR REPLACE VIEW bajiu_test_db.active_customers AS
-  SELECT id, name FROM bajiu_test_db.customers WHERE active=TRUE;
-```
-
-PowerShell 环境变量示例，以下凭据仅供测试：
-
-```powershell
-$env:BAJIU_MYSQL_TEST_ADDR = '127.0.0.1:33179'
-$env:BAJIU_MYSQL_TEST_USER = 'bajiu_test'
-$env:BAJIU_MYSQL_TEST_PASSWORD = 'bajiu-test-only-2026'
-$env:BAJIU_TEST_KEYRING = '1'
-
-# 可选：先按 tunnel/README.md 在专用测试网站部署脚本。
-# $env:BAJIU_HTTP_TEST_URL = 'http://127.0.0.1:34119/bajiu-mysql.php'
-# $env:BAJIU_HTTP_TEST_TOKEN = '<仅用于隔离测试的令牌>'
-go test ./internal/... -count=1 -v
-```
-
-集成测试检查真实服务器登录、元数据读取、错误密码、TLS 验证失败，以及系统凭据库的存取和清理。MySQL 测试启用时也通过临时 SSH 服务器验证密码、加密私钥、主机指纹及表 DDL；配置 HTTP 测试变量后还验证真实 PHP 中转、令牌拒绝与 DDL。未设置变量时跳过相关测试。
-
-## 代码结构
-
-- `internal/connections`：配置、凭据、MySQL 访问、会话生命周期和测试。
-- `app.go`：桌面方法桥接与本机文件选择。
-- `main.go`：窗口和桌面生命周期。
-- `frontend/src`：中文界面、交互和界面流程测试。
-- `build`：图标、平台资源与本机编译产物。
-- `THIRD_PARTY_NOTICES.md`、`licenses/`：第三方声明及许可证。
-
-第三方组件按各自许可证分发；应用自身的发布许可由项目所有者决定。MySQL 驱动采用 MPL-2.0，对应源码和获取方式见第三方声明。
+Bajiu DB is licensed under [Apache License 2.0](LICENSE). Third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [licenses](licenses/) and the bundled [MySQL driver source](third_party_sources/). Payment QR images are provided by the maintainer for optional donations.

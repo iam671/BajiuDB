@@ -1,66 +1,68 @@
-# 数据导入与导出
+# Data import and export
 
-版本仍为 0.0.1。
+**English** · [简体中文](data-transfer.zh-CN.md) · [Documentation](README.md)
 
-| 格式 | 导入/导出 | 可用条件 |
+Version **0.0.1**. These wizards currently apply to MySQL/MariaDB tables.
+
+| Format | Read/write behavior | Requirement |
 | --- | --- | --- |
-| TXT | UTF-8 分隔文本，首行为字段名；制表符、逗号、分号、竖线可选 | 内置 |
-| CSV | UTF-8 CSV，支持 BOM、引号及多行文本 | 内置 |
-| JSON | 导入对象数组或 columns/rows 对象；导出 columns/rows 对象 | 内置；数字按词法原文保留 |
-| XML | 导入本工具 XML 或包含 row/record 子元素的简单字段 XML；导出 data/columns/rows | 内置；仅文本字段，拒绝 DTD/外部实体和超深嵌套 |
-| XLSX | 选择工作表，首行为字段名；导出文本单元格，不生成公式；超过单张工作表的 1,048,575 行数据时自动继续到新工作表 | 内置 Excelize；日期样式转换为日期/时间字符串 |
-| DB | 选择 SQLite 数据表；导出新 SQLite 文件中的 TEXT/NULL 数据表 | 内置纯 Go SQLite；不导入虚拟表 |
-| XLS | 选择 Excel 97–2003 工作表；创建真实二进制工作簿；导出工作表名限 31 字符且不含空白或 []:*?/反斜杠 | Windows 64 位 ACE；XLS 单工作表的格式容量为 65,535 行数据，可选择 XLSX 自动分表 |
-| MDB / ACCDB | 选择 Access 用户表；导出新的 Access 文件和数据表 | Windows 64 位 ACE；不导出程序、宏、关系或索引 |
-| DBF | 读取 dBASE 表；创建 dBASE IV 文件 | Windows 64 位 ACE；字段名由 dBASE 转为大写，导出字段名限 ASCII 字母/数字/下划线且最多 10 字节，值使用系统代码页且不超过 254 个编码字节，不含 NULL/控制字符；不能无损编码时停止 |
-| ODBC | 输入连接字符串，枚举来源表；导出到新表 | Windows 系统 ODBC 和目标驱动；目标须支持创建、参数化写入和事务 |
+| TXT | UTF-8 delimited text with a header; tab, comma, semicolon or pipe | Built in |
+| CSV | UTF-8 CSV, BOM, quoted/multiline values | Built in |
+| JSON | Import object arrays or columns/rows; export columns/rows | Built in; numeric lexemes preserved |
+| XML | Import this app's XML or simple fields under row/record; export data/columns/rows | Built in; text fields, no DTD/external entities or excessive nesting |
+| XLSX | Select a sheet with a header; export text cells, never formulas; continue to another sheet after 1,048,575 data rows | Built-in Excelize; styled dates become date/time strings |
+| DB | Select a SQLite table; export a new SQLite file with TEXT/NULL columns | Built-in pure Go SQLite; virtual tables are not imported |
+| XLS | Select an Excel 97–2003 sheet; write a real binary workbook | Windows x64 ACE; one sheet holds 65,535 data rows; sheet name max 31 characters and no whitespace or []:*?/backslash |
+| MDB / ACCDB | Select an Access user table; create a new Access file/table | Windows x64 ACE; no programs, macros, relationships or indexes |
+| DBF | Read dBASE tables; write dBASE IV | Windows x64 ACE; uppercase ASCII field names, max 10 bytes; system-codepage values max 254 bytes; no NULL/control characters; unrepresentable values stop export |
+| ODBC | Enter a connection string, enumerate source tables; export to a new table | Windows ODBC and matching driver; destination must support create, parameterized writes and transactions |
 
-ACE/ODBC 驱动不随应用分发，也不会自动安装。ACE 可来自匹配位数的 [Microsoft Access Runtime](https://support.microsoft.com/en-gb/access/download-and-install-microsoft-365-access-runtime)。ODBC 连接字符串由所用驱动决定；界面隐藏输入，仅在本次窗口和操作内存使用。Windows 系统适配器使用 PowerShell/.NET，操作有期限和输出上限。
+ACE/ODBC drivers are not bundled or installed automatically. ACE may be supplied by a matching-bitness Microsoft Access Runtime. ODBC settings depend on the selected driver; the hidden connection-string field is kept only in the current window/operation memory. Windows adapters run through bounded PowerShell/.NET processes.
 
-## 导入
+## Import
 
-1. 选择目标 MySQL 表及来源格式。
-2. 选择文件，或输入 ODBC 连接字符串并连接。多表文件需选择表/工作表后读取。
-3. 检查字段映射及首行值。自增和生成列不列入可写映射，同一目标字段不能重复映射。
-4. 生成 SQL 预览，确认后才追加记录。改变来源或映射会废弃旧预览。
+1. Choose the target MySQL/MariaDB table and source format.
+2. Choose a file or enter an ODBC connection string. Select the source table/sheet for multi-table files.
+3. Review field mappings and the first row. Auto-increment/generated columns are excluded; one destination field cannot be mapped twice.
+4. Generate SQL and explicitly confirm before appending records. Changing the source/mapping invalidates the previous preview.
 
-文件最多 64 MB，解码后的文本数据最多 8 MB、10,000 行、1,024 列、200,000 个单元格，超过即停止，不做截断导入。生成的 SQL 仍受 8 MB 限制。只追加到已有表；字段类型和约束由 MySQL 校验。事务仅对事务表生效，出错或停止后请核对数据。
+Import limits: 64 MB source file; decoded text data up to 8 MB, 10,000 rows, 1,024 columns and 200,000 cells; generated SQL up to 8 MB. Exceeding a boundary stops import rather than truncating. Import appends to an existing table, with types/constraints enforced by the server. Only transactional tables support rollback; inspect the result after errors or cancellation.
 
-TXT/CSV/XLSX 中 `\N` 表示 NULL，空字段表示空字符串。与标记相同的字面值在前面加一个反斜杠，例如 `\\N` 表示字面 `\N`；其它路径（例如 UNC 路径）保持原值。XLS 另外用 `\E` 表示空字符串，同名的字面标记同样转义。JSON/XML/SQLite/Access/ODBC 使用自己的 NULL，不套用文本标记。
+TXT/CSV/XLSX use `\N` for NULL and an empty field for an empty string. A literal marker gains one leading backslash: `\N` represents literal `\N`. Other values, including UNC paths, retain their content. XLS additionally uses `\E` for an empty string and escapes literal markers the same way. JSON/XML/SQLite/Access/ODBC use their own NULL representation.
 
-JSON 导出示例：
+JSON export example:
 
 ```json
 {"columns":["id","note"],"rows":[["9007199254740993123",null]]}
 ```
 
-JSON 对象数组中的数字不经过浮点数转换；嵌套值保留为 JSON 文本。XML 输出使用 `<data><columns><column>...</column></columns><rows><row><cell null="true"/>...</row></rows></data>`。
+Numbers in JSON object-array imports do not pass through floating-point conversion. Nested values remain JSON text. XML exports use `<data><columns><column>...</column></columns><rows><row><cell null="true"/>...</row></rows></data>`.
 
-## 导出
+## Export
 
-选择格式后导出，文件输出使用系统另存为，取消后不读取数据。不设导出总行数、总文件大小、总单元格数的应用上限。数据在 Go 后端逐行读写，不把整表传到界面，也不复用最多 1,000 行的 SQL 预览接口。读取、写入或停止时出现错误不会发布不完整文件。只迁移字段和值，不迁移索引、约束、触发器或原 MySQL 类型；SQLite/Access/Excel 尽量以文本存储来保留大数原文。完整备份请用 SQL 转储。
+Export uses a system Save As dialog; cancellation before choosing a destination does not read the table. There is no application-wide total row, file-size or cell-count cap. Go streams rows directly into the writer instead of sending the entire table through the UI or using the limited query-preview interface. Errors/cancellation do not publish an incomplete file.
 
-TXT/CSV 默认提供公式防护，会为可能执行的电子表格公式添加单引号；需要原值再导入时可取消。XLSX 直接使用文本单元格。受目标格式影响而无法保持精度、编码、NULL 或空字符串时，系统驱动会回读核对并停止保存。
+Transfer moves field names and values, not indexes, constraints, triggers or original MySQL types. SQLite/Access/Excel use text where possible to preserve exact large numbers. Use SQL dump for table structure plus data; it does not include routines/events/triggers.
 
-直连/SSH 使用同一个数据库连接上的单条流式 SELECT，事务表使用该语句的读取快照；PHP 使用排序分页，每次请求独立，导出期间不要修改来源数据，否则可能出现跨批变化。更新配套 PHP 脚本后，单批响应过大时会自动缩小批次；单次响应与单条值仍受传输协议约束。停止导出、网络中断、磁盘写满或格式容量不足会明确报错，不报告完整成功。
+TXT/CSV formula protection is enabled by default and prefixes potential spreadsheet formulas with an apostrophe. Disable it when original values must be re-imported. XLSX uses text cells. System-driver exports are read back and rejected if the format/driver changes precision, encoding, NULL or empty strings.
 
-XLSX 使用流式工作表，超出单张容量后自动续表；XLS 仅支持一张表的原生容量，请为更大的数据选择 XLSX/CSV/JSON。系统驱动导出先流式暂存 JSONL，参数和 ODBC 连接字符串只经 stdin 传递，再逐行写入。回读核对字段、行数及保留重复行的 SHA-256 多重集摘要；不把整表放进内存排序。
+Direct/SSH export uses one streaming SELECT on one connection; transactional-table consistency is the statement's read snapshot. PHP uses ordered pagination through independent requests, so do not modify the source during export when consistency matters. Updated PHP scripts shrink batches when responses are too large; per-response and individual-value protocol boundaries remain. Cancellation, network failure, full disks and format capacity problems report an error.
 
-文件在独立临时目录中生成、关闭并验证后才替换目标；取消或出错不覆盖原文件。ODBC 不使用文件暂存，只创建新表，不覆盖已有表；失败时请求回滚；为避免误删其它会话替换的同名对象，不自动删除目标表。驱动的 DDL 可能隐式提交，停止/超时可能留下部分新表，不能保证回滚，请核对目标数据源。
+XLSX automatically continues in new sheets when one fills up. XLS has a single sheet's native capacity; use XLSX/CSV/JSON for larger exports. System-driver export streams through temporary JSONL and writes rows one by one. Parameters and ODBC secrets travel via stdin, not process arguments. Readback checks columns, row counts and duplicate-preserving SHA-256 multiset digests without sorting/loading the whole table into memory.
 
-## 二进制与空间字段
+Files are generated, closed and validated in a separate temporary directory before replacing the destination. Failure/cancellation preserves an existing file. ODBC creates a new destination table, never replaces one, and requests rollback on failure. Driver DDL can implicitly commit and leave part of a new table after cancellation/timeout; the app does not delete that table automatically because another session might have replaced it. Inspect the destination.
 
-向导支持导出含 BINARY/VARBINARY/BLOB、BIT 和空间字段的 MySQL 表。导出查询在服务器上先编码，再通过桥接和所选文件格式传递，不能把原始字节直接当作 UTF-8 文本：
+## Binary and spatial values
 
-- 二进制和 BIT：`0x` 加完整 HEX，如 `0x00FF80`；空二进制为 `0x`，NULL 保持独立的 NULL。
-- 空间：`SRID=4326;WKB=0x...`，保留 WKB 几何值和 SRID。使用 MySQL 默认的 SRID 坐标轴顺序，导入导出保持一致。
-- 导入映射到二进制/BIT 字段时，还原为二进制字面量；映射到空间字段时，用 `ST_GeomFromWKB` 和记录的 SRID 还原。编码错误在 SQL 预览前停止；几何合法性、目标 SRS 和字段约束由服务器校验。
-- 映射到普通文本字段时，保留编码字符串本身，不自动转换。外部来源写入二进制/空间目标也须遵循上述编码，不能将任意文本猜作原始字节。
+Tables containing BINARY/VARBINARY/BLOB, BIT and spatial columns can be exported. The server encodes these values before the text bridge:
 
-这些值在文件/目标数据源中作为编码文本存储，不会创建原生 BLOB 或空间列。HEX 约为原字节大小的两倍，不设导出总大小上限，目标格式限制仍适用；例如 DBF 的 254 字节值限制继续适用，超出会明确失败。自增/生成字段仍按现有规则从可写映射排除。
+- Binary and BIT: `0x` plus complete HEX, such as `0x00FF80`. Empty binary is `0x`; NULL stays distinct.
+- Spatial: `SRID=4326;WKB=0x...`, retaining WKB geometry and SRID. MySQL's default SRID axis order is retained for round trips.
+- Mapping back to binary/BIT generates validated binary literals. Spatial targets use `ST_GeomFromWKB` with the recorded SRID. Invalid encodings stop before SQL preview; the server checks geometry, target SRS and constraints.
+- Mapping to a text field retains the encoding as text. Arbitrary text is never guessed to be binary/spatial content.
 
-WKB 与 SRID 的转换依据 [MySQL WKB 构造函数](https://dev.mysql.com/doc/refman/8.0/en/gis-wkb-functions.html) 和 [几何格式转换函数](https://dev.mysql.com/doc/refman/8.0/en/gis-format-conversion-functions.html)。向导只迁移数据，不替代完整 SQL 结构和数据备份。
+Files/destination data sources hold encoded text, not native BLOB/spatial columns. HEX is about twice the original byte size. Native format restrictions still apply, such as DBF's 254-byte value maximum; unsupported values fail explicitly. Auto-increment/generated fields remain excluded from writable import mappings.
 
-## 平台范围
+## Platforms
 
-TXT/CSV/JSON/XML/XLSX/SQLite 的核心代码可在 Windows、Linux、macOS 构建。当前发布包和 ACE/ODBC 适配器为 Windows x64；其他平台明确显示系统驱动格式不可用，不伪装为文件格式支持。
+TXT/CSV/JSON/XML/XLSX/SQLite core readers/writers are designed for Windows/Linux/macOS builds. Current release packaging and ACE/ODBC adapters are Windows x64. Other platforms explicitly report system-driver formats as unavailable. This does not imply that macOS/Linux desktop builds have already been validated.
