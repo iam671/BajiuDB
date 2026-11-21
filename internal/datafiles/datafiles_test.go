@@ -34,6 +34,32 @@ func TestNativeFormatRoundTrips(t *testing.T) {
 		})
 	}
 }
+func TestEncodedMySQLValuesRoundTrip(t *testing.T) {
+	original := Data{Columns: []string{"payload", "place", "flags"}, Rows: [][]*string{
+		{text("0x00FF8041"), text("SRID=4326;WKB=0x01010000000000000000003E400000000000003440"), text("0x0101")},
+		{text("0x"), nil, nil},
+	}}
+	for _, format := range []string{"txt", "csv", "json", "xml", "xlsx", "db"} {
+		t.Run(format, func(t *testing.T) {
+			options := Options{Format: format, Path: filepath.Join(t.TempDir(), "data."+format), Table: "data", Delimiter: "tab", ProtectFormulas: true}
+			if err := Write(context.Background(), options, original); err != nil {
+				t.Fatal(err)
+			}
+			names, err := Inspect(context.Background(), options)
+			if err != nil || len(names) != 1 {
+				t.Fatal(names, err)
+			}
+			options.Table = names[0]
+			got, err := Read(context.Background(), options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, original) {
+				t.Fatalf("%s changed encoded binary/spatial values: %#v", format, got)
+			}
+		})
+	}
+}
 func TestJSONAndXMLExternalData(t *testing.T) {
 	d, err := readJSON([]byte(`[{"id":9007199254740993123,"amount":0.123456789012345678901,"optional":null,"nested":{"x":1234567890123456789}}]`))
 	if err != nil {

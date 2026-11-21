@@ -22,12 +22,41 @@ export function parseCSV(source:string):string[][]{
  if(rows.some(r=>r.length!==headers.length))throw new Error('CSV 每行列数必须与标题一致')
  return rows
 }
-export function importSQL(table:string,rows:(string|null)[][],mapping:string[],legacyNullMarker=true){
+function transferKind(type:string){
+ if(/^(?:(?:tiny|medium|long)?blob|(?:var)?binary|bit)\b/i.test(type))return 'binary'
+ if(/^(?:geometry|point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection)\b/i.test(type))return 'spatial'
+ return 'text'
+}
+// Encode on the server before values cross a text/JSON bridge. Never infer bytes
+// from queryResult's display strings, which may already have lost type information.
+export function transferSelectSQL(table:string,columns:(string|null)[][]){
+ if(!columns.length)throw new Error('请先成功读取表字段后再导出')
+ return 'SELECT '+columns.map(column=>{
+  const name=quoteIdentifier(column[0]??''),kind=transferKind(column[1]??'')
+  if(kind==='binary')return "CONCAT('0x',HEX("+name+')) AS '+name
+  if(kind==='spatial')return "CONCAT('SRID=',ST_SRID("+name+"),';WKB=0x',HEX(ST_AsWKB("+name+'))) AS '+name
+  return name
+ }).join(', ')+' FROM '+quoteIdentifier(table)+' LIMIT 1001'
+}
+function transferLiteral(value:string,type:string,name:string){
+ const kind=transferKind(type)
+ if(kind==='binary'){
+  if(!/^0x[0-9a-f]*$/i.test(value)||value.length%2!==0)throw new Error('字段 '+name+' 需要 0x 开头的 HEX 值（空二进制为 0x）')
+  return "X'"+value.slice(2).toUpperCase()+"'"
+ }
+ if(kind==='spatial'){
+  const match=/^SRID=(\d{1,10});WKB=0x([0-9a-f]+)$/i.exec(value)
+  if(!match||Number(match[1])>4294967295||match[2]!.length<10||match[2]!.length%2!==0)throw new Error('字段 '+name+' 需要 SRID=数字;WKB=0x十六进制 格式的空间值')
+  return "ST_GeomFromWKB(X'"+match[2]!.toUpperCase()+"', "+Number(match[1])+')'
+ }
+ return sqlText(value)
+}
+export function importSQL(table:string,rows:(string|null)[][],mapping:string[],legacyNullMarker=true,columnTypes:ReadonlyMap<string,string>=new Map()){
  const targets=mapping.map((name,index)=>({name,index})).filter(c=>c.name)
  if(!targets.length||new Set(targets.map(c=>c.name)).size!==targets.length)throw new Error('请映射至少一个字段，同一字段不能重复映射')
  const commands=['START TRANSACTION;']
- for(let start=1;start<rows.length;start+=100){commands.push('INSERT INTO '+quoteIdentifier(table)+' ('+targets.map(c=>quoteIdentifier(c.name)).join(', ')+') VALUES\n'+rows.slice(start,start+100).map(row=>'('+targets.map(c=>row[c.index]===null||(legacyNullMarker&&row[c.index]==='\\N')?'NULL':sqlText(row[c.index]??'')).join(', ')+')').join(',\n')+';')}
- commands.push('COMMIT;');const sql=commands.join('\n');if(sql.length>8*1024*1024)throw new Error('生成的 SQL 超过 8 MB，请拆分 CSV 文件');return sql
+ for(let start=1;start<rows.length;start+=100){commands.push('INSERT INTO '+quoteIdentifier(table)+' ('+targets.map(c=>quoteIdentifier(c.name)).join(', ')+') VALUES\n'+rows.slice(start,start+100).map(row=>'('+targets.map(c=>row[c.index]===null||(legacyNullMarker&&row[c.index]==='\\N')?'NULL':transferLiteral(row[c.index]??'',columnTypes.get(c.name)??'',c.name)).join(', ')+')').join(',\n')+';')}
+ commands.push('COMMIT;');const sql=commands.join('\n');if(sql.length>8*1024*1024)throw new Error('生成的 SQL 超过 8 MB，请拆分来源数据');return sql
 }
 export function csvText(result:QueryResult,protectFormulas=true){
  const cell=(value:string|null)=>{let text=value===null?'\\N':value;if(protectFormulas&&/^[=+@\-\t\r]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'}
