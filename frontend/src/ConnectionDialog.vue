@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted,computed } from 'vue'
-import SearchableSelect from './SearchableSelect.vue'
-import {databaseEngines,engineOf,engineLabel,mysqlFamily} from './databaseEngines'
+import {engineOf,engineLabel,mysqlFamily} from './databaseEngines'
 import {api} from './api'
 import { Database, X, LoaderCircle, FolderOpen, Eye, EyeOff, CheckCircle2, AlertCircle } from '@lucide/vue'
 import type { ConnectionInput, TestResult, ConnectionGroup } from './api'
@@ -20,11 +19,6 @@ const tab = ref('general')
 const visiblePassword = ref(false)
 const allTabs = [{id:'general',label:'常规'},{id:'advanced',label:'高级'},{id:'databases',label:'数据库'},{id:'ssl',label:'SSL'},{id:'ssh',label:'SSH'},{id:'http',label:'HTTP'}]
 const tabs=computed(()=>allTabs.filter(t=>engineOf(props.model)==='sqlite'?['general','advanced'].includes(t.id):mysqlFamily(props.model)||!['ssh','http'].includes(t.id)))
-function changeEngine(next:string){
- const engine=databaseEngines.find(e=>e.value===(next||'mysql'));if(!engine)return
- Object.assign(props.model,{port:engine.port,username:engine.user,database:engine.database,authDatabase:next==='mongodb'?'admin':'',filePath:'',password:'',passwordAction:'replace',hasPassword:false,sshPassword:'',sshKeyPassphrase:'',httpToken:'',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace',tlsMode:'disabled',caPath:'',serverName:'',tunnelMode:'direct'})
- tab.value='general';emit('password')
-}
 const pickerError=ref('')
 async function chooseSQLite(){try{const path=await api.SelectSQLiteFile();if(path)props.model.filePath=path;pickerError.value=''}catch(e){pickerError.value=String(e)}}
 function focusFirst(){nextTick(()=>document.getElementById('connection-name')?.focus())}
@@ -47,7 +41,6 @@ onMounted(focusFirst)
         <fieldset class="dialog-content" :disabled="!!busy||fatal">
           <section v-show="tab==='general'" role="tabpanel" id="connection-panel-general" aria-labelledby="connection-tabs-general">
             <div class="connection-route" aria-hidden="true"><div><img :src="APP_ICON" alt="" width="39" height="39"/><span>Bajiu DB</span></div><hr/><div><Database :size="35" stroke-width="1.3"/><span>数据库</span></div></div>
-            <div class="native-form-row"><label for="connection-engine">数据库类型：</label><SearchableSelect id="connection-engine" label="数据库类型" v-model="model.engine" :options="databaseEngines" :allow-custom="false" :disabled="!!busy||connectOnSave||editing" @change="changeEngine"/></div>
             <div class="native-form-row name-row"><label for="connection-name">连接名：</label><div class="native-field"><input id="connection-name" v-model="model.name" maxlength="80" autocomplete="off" :aria-invalid="!!errors.name"/><span v-if="errors.name" class="field-error">{{errors.name}}</span></div></div>
             <div class="native-form-row" v-if="engineOf(model)!=='sqlite'"><label for="connection-host">主机：</label><div class="native-field"><input id="connection-host" v-model="model.host" maxlength="253" spellcheck="false" :aria-invalid="!!errors.host"/><span v-if="errors.host" class="field-error">{{errors.host}}</span></div></div>
             <div class="native-form-row" v-if="engineOf(model)!=='sqlite'"><label for="connection-port">端口：</label><div class="native-field"><input id="connection-port" class="short-input" v-model.number="model.port" type="number" min="1" max="65535" :aria-invalid="!!errors.port"/><span v-if="errors.port" class="field-error">{{errors.port}}</span></div></div>

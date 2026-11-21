@@ -17,7 +17,7 @@ export interface AdminRequest {operation:string;name?:string;charset?:string;col
 export interface QueryResult {columns:string[];rows:(string|null)[][];affected:string;truncated:boolean}
 export interface AdminResult {results:QueryResult[];completed:number;error:string;errorCode?:number;text:string;transactionId?:string;transactionActive?:boolean}
 export interface DialogDetails {title:string;body:string;details:string;sql?:string}
-export interface WindowDialog {id:string;kind:'connection'|'group'|'confirm'|'about'|'database'|'index-fields'|'cell-value';title:string;width:number;height:number;payload:any;revision?:number}
+export interface WindowDialog {id:string;kind:'connection'|'connection-type'|'group'|'confirm'|'about'|'database'|'index-fields'|'cell-value';title:string;width:number;height:number;payload:any;revision?:number}
 export interface DialogAction {id:string;action:string;payload:any}
 export interface TransferFormat {id:string;label:string;available:boolean;note:string}
 export interface TransferData {columns:string[];rows:(string|null)[][]}

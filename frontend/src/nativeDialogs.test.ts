@@ -16,8 +16,9 @@ it('creates native connection and confirmation windows, synchronises edits and c
   case 'CloseWindowDialog':closed.push(String(args[0]));return
   default:throw Error('Unexpected call '+name)
  }})
- root=document.createElement('div');document.body.append(root);app=createApp(Workspace);app.mount(root);await settle();root.querySelector<HTMLButtonElement>('[aria-label="新建连接"]')!.click();await settle();expect(opened).toHaveLength(1);expect(opened[0].kind).toBe('connection');expect(root.querySelector('.connection-dialog')).toBeNull()
+ root=document.createElement('div');document.body.append(root);app=createApp(Workspace);app.mount(root);await settle();root.querySelector<HTMLButtonElement>('[aria-label="新建连接"]')!.click();await settle();expect(opened).toHaveLength(1);expect(opened[0].kind).toBe('connection-type');expect(root.querySelector('.connection-dialog')).toBeNull()
  const action=(data:DialogAction)=>window.dispatchEvent(new CustomEvent('bajiu:dialog-action',{detail:data}))
+ const picker=opened[0];action({id:picker.id,action:'choose',payload:{engine:'mysql'}});await settle();expect(closed).toContain(picker.id);expect(opened[1].kind).toBe('connection');expect(opened[1].payload.model.engine).toBe('mysql');opened.shift()
  action({id:opened[0].id,action:'model',payload:{changes:{name:'native QA'},clientVersion:1}});await settle();expect(updated.at(-1)?.payload.model.name).toBe('native QA')
  action({id:opened[0].id,action:'cancel',payload:{clientVersion:1}});await settle();expect(opened[1].kind).toBe('confirm');expect(root.querySelector('[role="alertdialog"]')).toBeNull()
  action({id:opened[1].id,action:'cancel',payload:{}});await settle();expect(closed).toContain(opened[1].id);expect(closed).not.toContain(opened[0].id)

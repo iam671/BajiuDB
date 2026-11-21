@@ -4,23 +4,21 @@ import ConnectionDialog from './ConnectionDialog.vue'
 import Workspace from './App.vue'
 import QueryEditor from './QueryEditor.vue'
 import {defaults,installNativeBridge} from './api'
-import {databaseEngines} from './databaseEngines'
+import {databaseEngines,newConnectionFor} from './databaseEngines'
 let app:App|undefined,root:HTMLDivElement
 async function settle(){for(let i=0;i<20;i++){await nextTick();await Promise.resolve()}}
 function button(text:string){const b=Array.from(root.querySelectorAll('button')).find(b=>b.textContent?.trim()===text);if(!b)throw Error(text);return b}
 beforeEach(()=>{root=document.createElement('div');document.body.append(root);localStorage.clear();vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}})})
 afterEach(()=>{app?.unmount();root.remove();delete window.go;installNativeBridge(undefined);vi.unstubAllGlobals()})
-it('switches connection types with matching defaults and supports a native SQLite file picker',async()=>{
- const model=reactive(defaults()),pick=vi.fn(async()=> 'test-only.db');window.go={main:{App:{SelectSQLiteFile:pick} as never}}
+it.each(databaseEngines)('opens $label settings with fixed matching defaults and no type dropdown',async(engine)=>{
+ const model=reactive(newConnectionFor(engine.value)!),pick=vi.fn(async()=> 'test-only.db');window.go={main:{App:{SelectSQLiteFile:pick} as never}}
  app=createApp(ConnectionDialog,{model,busy:'',errors:{},result:null,error:'',editing:false,connectOnSave:false,fatal:false,groups:[]});app.mount(root);await settle()
- for(const engine of databaseEngines.filter(e=>e.value!=='mysql')){
-  const input=root.querySelector<HTMLInputElement>('#connection-engine')!;input.value=engine.value;input.dispatchEvent(new Event('input',{bubbles:true}));await settle()
+  expect(root.querySelector('#connection-engine')).toBeNull();expect(root.querySelector('h2')?.textContent).toContain(engine.label)
   expect(model.engine).toBe(engine.value);expect(model.port).toBe(engine.port);expect(model.username).toBe(engine.user);expect(model.database).toBe(engine.database)
   if(engine.value==='sqlite'){expect(root.querySelector('#connection-host')).toBeNull();root.querySelector<HTMLButtonElement>('[aria-label="选择 SQLite 文件"]')!.click();await settle();expect(model.filePath).toBe('test-only.db')}
   else expect(root.querySelector('#connection-host')).not.toBeNull()
   if(!['mysql','mariadb'].includes(engine.value))expect(Array.from(root.querySelectorAll('[role=tab]')).map(t=>t.textContent)).not.toContain('SSH')
- }
- button('数据库').click();await settle();expect(root.querySelector('#mongo-authdb')).not.toBeNull();expect(model.authDatabase).toBe('admin')
+ if(engine.value==='mongodb'){button('数据库').click();await settle();expect(root.querySelector('#mongo-authdb')).not.toBeNull();expect(model.authDatabase).toBe('admin')}
 })
 it.each(['sqlite','postgresql','sqlserver','oracle','redis','mongodb'])('browses %s with its native preview instead of MySQL table editing and schema menus',async(engine)=>{
  const query=engine==='redis'?'["GET","key"]':engine==='mongodb'?'{"find":"items"}':'SELECT * FROM items';const execute=vi.fn(async()=>({results:[],completed:1,error:'',text:''}))

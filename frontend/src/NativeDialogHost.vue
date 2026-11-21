@@ -4,6 +4,7 @@ useTableResizing()
 import {onMounted,onUnmounted,ref,watch} from 'vue'
 import {api,type WindowDialog} from './api'
 import ConnectionDialog from './ConnectionDialog.vue'
+import ConnectionTypePicker from './ConnectionTypePicker.vue'
 import GroupDialog from './GroupDialog.vue'
 import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
@@ -38,7 +39,8 @@ onUnmounted(()=>{clearTimeout(syncTimer);window.removeEventListener('bajiu:dialo
 <template><div class="native-dialog-host">
  <p v-if="error" class="navigation-error" role="alert">{{error}}</p>
  <template v-if="state">
-  <ConnectionDialog v-if="state.kind==='connection'" v-bind="state.payload" @save="formAction('save')" @cancel="formAction('cancel')" @test="formAction('test')" @password="formAction('password')" @forget="formAction('forget')" @choose-c-a="formAction('chooseCA')" @choose-ssh-key="formAction('chooseSSHKey')"/>
+  <ConnectionTypePicker v-if="state.kind==='connection-type'" :recent="state.payload.recent" @choose="engine=>action('choose',{engine})" @cancel="action('cancel')"/>
+  <ConnectionDialog v-else-if="state.kind==='connection'" v-bind="state.payload" @save="formAction('save')" @cancel="formAction('cancel')" @test="formAction('test')" @password="formAction('password')" @forget="formAction('forget')" @choose-c-a="formAction('chooseCA')" @choose-ssh-key="formAction('chooseSSHKey')"/>
   <GroupDialog v-else-if="state.kind==='group'" v-bind="state.payload" @save="formAction('save')" @cancel="formAction('cancel')"/>
   <CellValueDialog v-else-if="state.kind==='cell-value'" v-bind="state.payload" @apply="cell=>action('apply',{cell})" @cancel="action('cancel')"/>
   <IndexFieldsDialog v-else-if="state.kind==='index-fields'" v-bind="state.payload" @apply="value=>action('apply',{value})" @cancel="action('cancel')"/>

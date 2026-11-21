@@ -4,6 +4,7 @@ useTableResizing()
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Plug, Unplug, Plus, Database, Table2, PanelsTopLeft, Braces, Users, Wrench, FileCode2, SquareTerminal, Archive, Workflow, Network, ChartNoAxesColumn, ChevronDown, ChevronRight, Folder, Search, X, RefreshCw, Pencil, Trash2, Copy, Info, List, LayoutGrid, PanelRight, SlidersHorizontal, FileText, Clock3, AlertCircle, CheckCircle2, LoaderCircle, Eye, ShieldCheck, Check, FolderOpen } from '@lucide/vue'
 import ConnectionDialog from './ConnectionDialog.vue'
+import ConnectionTypePicker from './ConnectionTypePicker.vue'
 import GroupDialog from './GroupDialog.vue'
 import InlineGroupEditor from './InlineGroupEditor.vue'
 import DatabaseTools, {type DatabaseToolMode} from './DatabaseTools.vue'
@@ -20,7 +21,7 @@ import type {TableSection} from './tableEditing'
 import ConfirmationDialog from './ConfirmationDialog.vue'
 import AboutDialog from './AboutDialog.vue'
 import {quoteIdentifier} from './tableData'
-import {engineOf,engineLabel,mysqlFamily,objectLabel,defaultQuery} from './databaseEngines'
+import {engineOf,engineLabel,mysqlFamily,objectLabel,defaultQuery,newConnectionFor,rememberEngine} from './databaseEngines'
 import {useNativeDialogs} from './nativeDialogs'
 import {useMenuDismissal} from './menuDismissal'
 import {useObjectMarquee} from './objectMarquee'
@@ -128,6 +129,9 @@ const draggedConnection=computed(()=>profiles.value.find(p=>p.id===draggedConnec
 const connectionDragType='application/x-bajiu-connection'
 const form = reactive(defaults())
 const baseline = ref(JSON.stringify(form))
+const typePickerOpen=ref(false)
+let typePickerGroup=''
+const recentTypes=computed(()=>[...new Set([...profiles.value].sort((a,b)=>String(b.updatedAt??'').localeCompare(String(a.updatedAt??''))).map(engineOf))].slice(0,4))
 const dialogOpen = ref(false)
 const connectionClientVersion=ref(0),groupClientVersion=ref(0)
 const editingID = ref('')
@@ -231,17 +235,25 @@ function cancelConfirm(){confirm.open=false;confirm.action=null;nextTick(()=>{if
 function focusReturn(){nextTick(()=>{if(returnFocus?.isConnected)returnFocus.focus();else(document.querySelector<HTMLElement>('.tree-connection.selected')??document.querySelector<HTMLElement>('.tree-group.selected')??document.querySelector<HTMLElement>('.tree-root'))?.focus()})}
 function closeDialog(){dialogOpen.value=false;clearFeedback();Object.assign(form,defaults());baseline.value=JSON.stringify(form);focusReturn()}
 function cancelDialog(){if(busy.value)return;if(dirty.value)ask('放弃未保存的修改？','此连接的修改尚未保存。是否放弃这些修改并关闭窗口？','放弃修改',closeDialog,true);else closeDialog()}
-function openDialog(p?:Profile,connect=false){
+function openDialog(p?:Profile,connect=false,engine='mysql'){
   if(busy.value)return
   connectionClientVersion.value=0
   returnFocus=document.activeElement as HTMLElement
   clearFeedback();menu.value='';contextMenu.open=false
-  Object.assign(form,p?fromProfile(p):defaults())
+  Object.assign(form,p?fromProfile(p):newConnectionFor(engine)??defaults())
   if(!p)form.groupId=selectedGroupID.value
   if(p&&transientPasswords.has(p.id))Object.assign(form,transientPasswords.get(p.id),{passwordAction:'replace',sshPasswordAction:'replace',sshKeyPassphraseAction:'replace',httpTokenAction:'replace'})
   editingID.value=p?.id??'';connectOnSave.value=connect;baseline.value=JSON.stringify(form);dialogOpen.value=true
 }
-function create(){openDialog()}
+function create(){
+ if(busy.value||dialogOpen.value||typePickerOpen.value)return
+ returnFocus=document.activeElement as HTMLElement;typePickerGroup=selectedGroupID.value;closeMenus();typePickerOpen.value=true
+}
+function cancelTypePicker(){typePickerOpen.value=false;focusReturn()}
+function chooseConnectionType(engine:string){
+ const model=newConnectionFor(engine,typePickerGroup);if(!typePickerOpen.value||busy.value||!model)return
+ typePickerOpen.value=false;rememberEngine(engine);openDialog(undefined,false,engine);form.groupId=model.groupId;baseline.value=JSON.stringify(form)
+}
 function edit(){if(selected.value)openDialog(selected.value)}
 function duplicate(){const p=selected.value;if(!p)return;openDialog();Object.assign(form,{...p,id:'',revision:0,name:p.name+' 副本',hasPassword:false,password:'',passwordAction:'replace',rememberPassword:true,createdAt:'',updatedAt:''});}
 function validate(requireName=true){for(const key of Object.keys(errors))delete errors[key];if(requireName&&!form.name.trim())errors.name='请输入连接名';if(engineOf(form)==='sqlite'){if(!form.filePath.trim())errors.filePath='请选择数据库文件'}else{if(!form.host.trim())errors.host='请输入主机地址';if(!Number.isInteger(Number(form.port))||form.port<1||form.port>65535)errors.port='端口范围为 1–65535';if(!['redis','mongodb'].includes(engineOf(form))&&!form.username.trim())errors.username='请输入用户名'}if(Object.keys(errors).length){dialogRef.value?.showValidation();return false}return true}
@@ -575,8 +587,8 @@ function resizeKeys(e:KeyboardEvent,side:'left'|'right'){if(e.key!=='ArrowLeft'&
 async function copyText(value:string){try{await navigator.clipboard.writeText(value);}catch{showNavigationError('无法访问剪贴板')}}
 function shortcuts(e:KeyboardEvent){
   if(databaseTool.value)return
-  if(e.key==='Escape'){e.preventDefault();if(cellValuePicker.value){cellValuePicker.value=undefined}else if(indexFieldsPicker.value){indexFieldsPicker.value=undefined}else if(tableNamePrompt.value){tableNamePrompt.value=undefined}else if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;confirm.action=null;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
-  if(groupDialogOpen.value)return
+  if(e.key==='Escape'){e.preventDefault();if(typePickerOpen.value){cancelTypePicker()}else if(cellValuePicker.value){cellValuePicker.value=undefined}else if(indexFieldsPicker.value){indexFieldsPicker.value=undefined}else if(tableNamePrompt.value){tableNamePrompt.value=undefined}else if(detailDialog.value){detailDialog.value=undefined}else if(confirm.open){confirm.open=false;confirm.action=null;nextTick(()=>document.querySelector<HTMLButtonElement>('.connection-dialog .window-close')?.focus())}else if(about.value)about.value=false;else if(groupDialogOpen.value)closeGroupDialog();else if(dialogOpen.value)cancelDialog();else closeMenus();return}
+  if(groupDialogOpen.value||typePickerOpen.value)return
   if(cellValuePicker.value||indexFieldsPicker.value||tableNamePrompt.value||detailDialog.value||confirm.open||about.value)return
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'&&dialogOpen.value){e.preventDefault();void saveDialog();return}
   if(dialogOpen.value)return
@@ -597,6 +609,7 @@ onMounted(async()=>{
 })
 const nativeDialogDefinitions=computed(()=>{
  const windows=[]
+ if(typePickerOpen.value)windows.push({key:'connection-type',kind:'connection-type' as const,title:'选择连接类型',width:800,height:570,payload:{recent:recentTypes.value}})
  if(dialogOpen.value)windows.push({key:'connection',kind:'connection' as const,title:engineLabel(form)+' - '+(connectOnSave.value?'打开连接':editingID.value?'编辑连接':'新建连接'),width:580,height:580,payload:{model:form,clientVersion:connectionClientVersion.value,busy:busy.value,errors,result:testResult.value,error:testError.value,editing:!!editingID.value,connectOnSave:connectOnSave.value,fatal:!!fatalError.value,groups:connectionGroups.value}})
  if(groupDialogOpen.value)windows.push({key:'group',kind:'group' as const,title:'移至分组',width:420,height:240,payload:{model:groupForm,clientVersion:groupClientVersion.value,groups:connectionGroups.value,busy:!!busy.value,error:groupError.value}})
  if(databaseTool.value){const{profile,database,mode,table,initialSQL}=databaseTool.value;const titles={create:'新建数据库',alter:'编辑数据库',drop:'删除数据库',query:'新建查询',console:'命令行界面',run:'运行 SQL 文件',dump:'转储 SQL 文件',dictionary:'数据字典',model:'逆向数据库到模型',createTable:'新建表',import:'导入向导',export:'导出向导',generate:'数据生成',openTable:'打开表',designTable:'设计表'};const compact=['create','alter','drop'].includes(mode);windows.push({key:'database',kind:'database' as const,title:titles[mode]+' · '+profile.name+' / '+database,width:mode==='drop'?420:compact?600:1000,height:mode==='drop'?320:compact?350:650,payload:{profile,database,mode,table,initialSQL}})}
@@ -610,7 +623,8 @@ const nativeDialogDefinitions=computed(()=>{
 })
 function nativeDialogAction(key:string,event:DialogAction){
  const action=event.action,payload=event.payload??{}
- if(key==='connection'){
+ if(key==='connection-type'){if(action==='choose'&&typeof payload.engine==='string')chooseConnectionType(payload.engine);else if(action==='cancel')cancelTypePicker()}
+ else if(key==='connection'){
   if(Number(payload.clientVersion??0)>=connectionClientVersion.value){connectionClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(form,payload.changes);else if(payload.model)Object.assign(form,payload.model)}
   if(action==='save')void saveDialog();else if(action==='test')void testConnection();else if(action==='cancel')cancelDialog();else if(action==='password')passwordChanged();else if(action==='forget')forgetPassword();else if(action==='chooseCA')void chooseCA();else if(action==='chooseSSHKey')void chooseSSHKey()
  }else if(key==='group'){if(Number(payload.clientVersion??0)>=groupClientVersion.value){groupClientVersion.value=Number(payload.clientVersion??0);if(action==='model'&&payload.changes)Object.assign(groupForm,payload.changes);else if(payload.model)Object.assign(groupForm,payload.model)};if(action==='save')void saveGroupDialog();else if(action==='cancel')closeGroupDialog()}
@@ -628,7 +642,7 @@ onUnmounted(()=>{if(dumpTask.value)void api.CancelDatabaseTask(dumpTask.value);d
 
 <template>
   <div class="desktop-app" @click="closeMenus">
-    <div class="desktop-workspace" :inert="dialogOpen||groupDialogOpen||confirm.open||about||!!detailDialog||!!indexFieldsPicker||!!tableNamePrompt||!!cellValuePicker||!!databaseTool||undefined">
+    <div class="desktop-workspace" :inert="typePickerOpen||dialogOpen||groupDialogOpen||confirm.open||about||!!detailDialog||!!indexFieldsPicker||!!tableNamePrompt||!!cellValuePicker||!!databaseTool||undefined">
       <nav class="application-menubar" aria-label="主菜单">
         <div v-for="entry in [{id:'file',label:'文件(F)'},{id:'view',label:'查看(V)'},{id:'favorites',label:'收藏夹(A)'},{id:'tools',label:'工具(T)'},{id:'window',label:'窗口(W)'},{id:'help',label:'帮助(H)'}]" :key="entry.id" class="application-menu">
           <button :disabled="entry.id==='favorites'" :title="entry.id==='favorites'?'当前版本尚未提供收藏夹':''" :aria-expanded="menu===entry.id" aria-haspopup="menu" @click.stop="showMenu(entry.id)" :class="{open:menu===entry.id}">{{entry.label}}</button>
@@ -733,6 +747,7 @@ onUnmounted(()=>{if(dumpTask.value)void api.CancelDatabaseTask(dumpTask.value);d
       <footer class="application-statusbar"><span>{{activeDocument?activeDocument.title:selectedTables.length?'已选择 '+selectedTables.length+' 个表':selectedRow?'已选择 1 项':objectsLoading?'正在读取…':'就绪'}}</span><span v-if="activeDocument" class="status-context"><Plug :size="12"/>{{activeDocument.profile.name}}<Database :size="12"/>{{activeDocument.database}}</span><span class="status-context" v-else-if="selected"><Plug :size="12"/>{{selected.name}}<template v-if="selectedDatabase"><Database :size="12"/>{{selectedDatabase}}</template></span><span class="status-security" :title="configPath"><ShieldCheck :size="12"/>本机存储</span><div v-show="activeWorkspaceTab==='objects'" class="view-buttons"><button :class="{active:viewMode==='icons'}" aria-label="图标视图" :aria-pressed="viewMode==='icons'" @click="viewMode='icons'"><LayoutGrid :size="13"/></button><button :class="{active:viewMode==='details'}" aria-label="详细信息视图" :aria-pressed="viewMode==='details'" @click="viewMode='details'"><List :size="13"/></button><button :class="{active:showInformation}" aria-label="显示或隐藏信息窗格" :aria-pressed="showInformation" @click="showInformation=!showInformation"><PanelRight :size="13"/></button></div></footer>
     </div>
     <DatabaseTools v-if="!nativeWindows&&databaseTool" :profile="databaseTool.profile" :database="databaseTool.database" :mode="databaseTool.mode" :table="databaseTool.table" :initialSQL="databaseTool.initialSQL" @close="closeDatabaseTool" @changed="databaseChanged"/>
+    <ConnectionTypePicker v-if="!nativeWindows&&typePickerOpen" :recent="recentTypes" @choose="chooseConnectionType" @cancel="cancelTypePicker"/>
     <ConnectionDialog v-if="!nativeWindows&&dialogOpen" ref="dialogRef" :inert="confirm.open||undefined" :model="form" :groups="connectionGroups" :editing="!!editingID" :connect-on-save="connectOnSave" :busy="busy" :errors="errors" :result="testResult" :error="testError" :fatal="!!fatalError||!desktop" @save="saveDialog" @cancel="cancelDialog" @test="testConnection" @password="passwordChanged" @forget="forgetPassword" @choose-c-a="chooseCA" @choose-ssh-key="chooseSSHKey"/>
     <GroupDialog v-if="!nativeWindows&&groupDialogOpen" :model="groupForm" :groups="connectionGroups" :busy="!!busy" :error="groupError" @save="saveGroupDialog" @cancel="closeGroupDialog"/>
     <div v-if="contextMenu.open" ref="contextMenuRef" class="connection-context-menu menu-popup" role="menu" :style="{left:contextMenu.x+'px',top:contextMenu.y+'px'}" @click.stop @keydown="contextKeys"><template v-for="(item,index) in contextMenuItems" :key="item.label"><div v-if="index>0&&item.group!==contextMenuItems[index-1]?.group" class="context-menu-separator" role="separator"></div><div v-if="item.children" class="context-submenu-group" @mouseleave="contextSubmenu=''"><button data-context-main :data-context-submenu="item.label" role="menuitem" aria-haspopup="menu" :aria-expanded="contextSubmenu===item.label" :disabled="item.disabled" @mouseenter="openContextSubmenu(item,$event.currentTarget as HTMLElement)" @click="openContextSubmenu(item,$event.currentTarget as HTMLElement,true)">{{item.label}}<ChevronRight :size="12"/></button><div v-if="contextSubmenu===item.label" class="context-submenu menu-popup" role="menu" :aria-label="item.label" :style="contextSubmenuStyle"><button v-for="child in item.children" :key="child.label" role="menuitem" :disabled="child.disabled" @click="invoke(child)">{{child.label}}</button></div></div><button v-else data-context-main role="menuitem" :disabled="item.disabled" :class="{danger:item.danger}" @mouseenter="contextSubmenu=''" @click="invoke(item)">{{item.label}}<kbd>{{item.shortcut}}</kbd></button></template></div>

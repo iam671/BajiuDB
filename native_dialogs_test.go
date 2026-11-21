@@ -52,3 +52,13 @@ func TestCellValueWindow(t *testing.T) {
 		t.Fatal("cell value editor must use an independent resizable native window")
 	}
 }
+func TestConnectionTypePickerNativeWindow(t *testing.T) {
+	state := WindowDialog{ID: "qa-connection-picker", Kind: "connection-type", Title: "选择连接类型", Width: 800, Height: 570, Payload: json.RawMessage(`{"recent":["mysql","redis"]}`)}
+	if err := validWindowDialog(state); err != nil {
+		t.Fatal(err)
+	}
+	options := dialogWindowOptions(state)
+	if options.DisableResize || options.Width != 800 || options.Height != 570 || options.MinWidth != 520 || options.MinHeight != 360 {
+		t.Fatal("type picker must be an independent resizable native window")
+	}
+}
