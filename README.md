@@ -1,6 +1,6 @@
 <div align="center">
 
-# Bajiu DB · 捌玖
+# Bajiu DB
 
 **A lightweight database manager for your desktop.**
 
