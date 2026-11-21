@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -89,7 +90,10 @@ func (d *relationalDatabase) pool(ctx context.Context, database string) (*sql.DB
 		cfg.RuntimeParams = map[string]string{"application_name": "BajiuDB"}
 		db = stdlib.OpenDB(*cfg)
 	case "sqlserver":
-		cfg := msdsn.Config{Host: in.Host, Port: uint64(in.Port), User: in.Username, Password: d.password, Database: database, AppName: "BajiuDB", DialTimeout: timeout, ConnTimeout: timeout, Encryption: msdsn.EncryptionDisabled, DisableRetry: true}
+		cfg, e := sqlServerConfig(in, d.password, database)
+		if e != nil {
+			return nil, e
+		}
 		if tlsConfig != nil {
 			cfg.Encryption = msdsn.EncryptionRequired
 			cfg.TLSConfig = tlsConfig
@@ -134,6 +138,16 @@ func (d *relationalDatabase) pool(ctx context.Context, database string) (*sql.DB
 	db.SetConnMaxIdleTime(3 * time.Minute)
 	d.pools[key] = db
 	return db, nil
+}
+
+// Parse the structured URL so the driver initializes its protocol registry and
+// protocol parameters. A zero-value msdsn.Config cannot establish a connection.
+func sqlServerConfig(in Input, password, database string) (msdsn.Config, error) {
+	params := url.Values{"database": {database}, "encrypt": {"disable"}, "dial timeout": {strconv.Itoa(in.Timeout)}, "connection timeout": {strconv.Itoa(in.Timeout)}, "app name": {"BajiuDB"}}
+	uri := url.URL{Scheme: "sqlserver", User: url.UserPassword(in.Username, password), Host: net.JoinHostPort(in.Host, strconv.Itoa(in.Port)), RawQuery: params.Encode()}
+	cfg, err := msdsn.Parse(uri.String())
+	cfg.DisableRetry = true
+	return cfg, err
 }
 func (d *relationalDatabase) Close() error {
 	d.mu.Lock()

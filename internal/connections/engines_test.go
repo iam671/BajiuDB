@@ -25,6 +25,63 @@ func TestMongoPreviewKeepsCommandFirstAndQuotesCollectionName(t *testing.T) {
 		t.Fatal(string(query), command, err)
 	}
 }
+func TestSQLServerConfigInitializesTCPAndPreservesEscapedCredentials(t *testing.T) {
+	in := validInput()
+	in.Engine = "sqlserver"
+	in.Host = "::1"
+	in.Port = 1433
+	in.Username = "user@test"
+	password := "test-only:p@ss;/=?#"
+	cfg, err := sqlServerConfig(in, password, "db;name")
+	if err != nil || len(cfg.Protocols) == 0 || cfg.Protocols[0] != "tcp" || cfg.Host != "::1" || cfg.Password != password || cfg.User != in.Username || cfg.Database != "db;name" || cfg.Port != 1433 {
+		t.Fatal("invalid structured SQL Server configuration", err)
+	}
+}
+func TestNetworkDriversUseNativeTCPAndFailCleanly(t *testing.T) {
+	for _, engine := range []string{"postgresql", "sqlserver", "oracle", "redis", "mongodb"} {
+		t.Run(engine, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			accepted := make(chan struct{}, 1)
+			go func() {
+				conn, e := listener.Accept()
+				if e == nil {
+					accepted <- struct{}{}
+					conn.Close()
+				}
+			}()
+			in := validInput()
+			in.Engine = engine
+			in.Port = listener.Addr().(*net.TCPAddr).Port
+			in.Database = "test"
+			in.AuthDatabase = "admin"
+			if engine == "redis" {
+				in.Database = "0"
+				in.Username = ""
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			db, err := (DatabaseDialer{}).Open(ctx, in, in.Password)
+			if db != nil {
+				db.Close()
+			}
+			if err == nil {
+				t.Fatal("non-database TCP endpoint accepted")
+			}
+			select {
+			case <-accepted:
+			default:
+				t.Fatal("driver did not attempt TCP")
+			}
+			if strings.Contains(err.Error(), in.Password) {
+				t.Fatal("driver error disclosed password")
+			}
+		})
+	}
+}
 
 func TestEightEngineNormalizationAndLegacyProfiles(t *testing.T) {
 	if len(engineCatalog) != 8 {
