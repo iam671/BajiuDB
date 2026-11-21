@@ -28,6 +28,31 @@ Bajiu DB 是一款开源桌面数据库管理工具，专注连接、查询、�
 
 当前版本为 **0.0.1**，应用界面为简体中文，文档提供中英文版本。当前提供 Windows x64 打包流程；macOS/Linux 桌面构建及运行效果仍待验证。
 
+## 界面截图
+
+以下为应用实际界面，点击图片可查看完整尺寸。
+
+<a href="docs/assets/screenshots/workspace.png"><img src="docs/assets/screenshots/workspace.png" alt="连接管理工作区" width="960"/></a>
+
+<table>
+  <tr>
+    <td align="center"><strong>选择数据库类型</strong><br/><a href="docs/assets/screenshots/connection-types.png"><img src="docs/assets/screenshots/connection-types.png" alt="选择数据库类型" width="420"/></a></td>
+    <td align="center"><strong>SQL 命令行</strong><br/><a href="docs/assets/screenshots/sql-console.png"><img src="docs/assets/screenshots/sql-console.png" alt="SQL 命令行" width="420"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>数据字典</strong><br/><a href="docs/assets/screenshots/data-dictionary.png"><img src="docs/assets/screenshots/data-dictionary.png" alt="数据字典" width="420"/></a></td>
+    <td align="center"><strong>数据库模型</strong><br/><a href="docs/assets/screenshots/database-model.png"><img src="docs/assets/screenshots/database-model.png" alt="数据库模型" width="420"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>数据生成</strong><br/><a href="docs/assets/screenshots/data-generation.png"><img src="docs/assets/screenshots/data-generation.png" alt="数据生成" width="420"/></a></td>
+    <td align="center"><strong>导出向导</strong><br/><a href="docs/assets/screenshots/export-wizard.png"><img src="docs/assets/screenshots/export-wizard.png" alt="导出向导" width="420"/></a></td>
+  </tr>
+</table>
+
+数据库右键菜单
+
+<a href="docs/assets/screenshots/database-context-menu.png"><img src="docs/assets/screenshots/database-context-menu.png" alt="数据库右键菜单" width="260"/></a>
+
 ## 功能特性
 
 ### 连接与对象浏览

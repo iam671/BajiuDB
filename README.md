@@ -28,6 +28,31 @@ Bajiu DB is an open-source desktop database manager focused on everyday work: or
 
 Current version: **0.0.1**. The interface is currently in Simplified Chinese. Documentation is available in English and Chinese. Windows x64 is the currently packaged platform; macOS/Linux desktop builds and runtime behavior still need validation.
 
+## Screenshots
+
+The screenshots below show the Simplified Chinese interface. Click any image to view it at full resolution.
+
+<a href="docs/assets/screenshots/workspace.png"><img src="docs/assets/screenshots/workspace.png" alt="Connection workspace" width="960"/></a>
+
+<table>
+  <tr>
+    <td align="center"><strong>Connection types</strong><br/><a href="docs/assets/screenshots/connection-types.png"><img src="docs/assets/screenshots/connection-types.png" alt="Connection types" width="420"/></a></td>
+    <td align="center"><strong>SQL console</strong><br/><a href="docs/assets/screenshots/sql-console.png"><img src="docs/assets/screenshots/sql-console.png" alt="SQL console" width="420"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Data dictionary</strong><br/><a href="docs/assets/screenshots/data-dictionary.png"><img src="docs/assets/screenshots/data-dictionary.png" alt="Data dictionary" width="420"/></a></td>
+    <td align="center"><strong>Database model</strong><br/><a href="docs/assets/screenshots/database-model.png"><img src="docs/assets/screenshots/database-model.png" alt="Database model" width="420"/></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Data generation</strong><br/><a href="docs/assets/screenshots/data-generation.png"><img src="docs/assets/screenshots/data-generation.png" alt="Data generation" width="420"/></a></td>
+    <td align="center"><strong>Export wizard</strong><br/><a href="docs/assets/screenshots/export-wizard.png"><img src="docs/assets/screenshots/export-wizard.png" alt="Export wizard" width="420"/></a></td>
+  </tr>
+</table>
+
+Database context menu
+
+<a href="docs/assets/screenshots/database-context-menu.png"><img src="docs/assets/screenshots/database-context-menu.png" alt="Database context menu" width="260"/></a>
+
 ## Features
 
 ### Connections and browsing
