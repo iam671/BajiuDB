@@ -62,7 +62,13 @@ func (s FileStore) readDocument() (document, error) {
 		groupIDs[group.ID], groupNames[strings.ToLower(name)] = true, true
 	}
 	seen := map[string]bool{}
-	for _, r := range doc.Connections {
+	for i := range doc.Connections {
+		r := doc.Connections[i]
+		r.Engine = canonicalEngine(r.Engine)
+		if _, ok := engineCatalog[r.Engine]; !ok {
+			return empty, errors.New("连接类型无效，原文件已保留")
+		}
+		doc.Connections[i] = r
 		if r.ID == "" || seen[r.ID] {
 			return empty, errors.New("连接配置中存在无效或重复标识，原文件已保留")
 		}

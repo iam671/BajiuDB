@@ -1,3 +1,12 @@
+## 八种数据库连接（2026-11-21，版本仍为 0.0.1）
+
+- 引擎注册表接入 MySQL、MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、Redis、MongoDB 的真实 Go 驱动。新建连接切换端口/账户/数据库默认值，SQLite 文件选择、Oracle 服务名、MongoDB 认证库、Redis 逻辑库；类型固定为保存的连接身份，旧配置兼容 MySQL，不改变原凭据引用格式。
+- 新类型接入连接测试、保存/打开/关闭、数据库或模式、对象浏览和原生查询。MySQL/MariaDB 保留管理能力；其它类型隐藏 MySQL 结构菜单，QueryEditor 不执行 MySQL 可编辑结果探测。网络新类型直连及可选证书验证 TLS，隧道页面仅 MySQL/MariaDB 可用。
+- SQLite 使用真实临时文件经 Service 保存/打开，验证表/视图、安全引用名称、原生 SELECT/INSERT、大数文本、BLOB HEX、关闭，不创建不存在文件、拒绝无效文件；配置迁移、秘密不落配置、错误不回显凭据、TLS 主机名校验、拒绝改变已保存类型等 Go 检查通过。
+- 使用单独启动、自动结束、随机端口/独立目录/关闭持久化/测试密码的 Redis 实例，实际验证登录、INFO、逻辑库 2 与 0 隔离、SCAN/类型、字符串与 hash 查询、二进制键、命令结果和不支持的持续订阅处理；不连接已有 Redis 服务或业务数据库。
+- 28 个前端文件、163 项检查通过（排除先前已记录的历史 App.test.ts 失败），包含八类型选择与默认值、原生 SQLite 文件选择、六种新类型对象打开/菜单分流、原生查询仅执行一次及结果保留大数文本。Go 全部单元检查、go vet 和 TypeScript 检查通过，连接包 Linux amd64 交叉编译通过（仅编译，未运行）。
+- Windows 生产构建/发布打包通过，版本仍为 0.0.1，新增驱动许可与配置说明随包附带。PostgreSQL、SQL Server、Oracle、MariaDB、MongoDB 本次未做真实服务器端到端验证；Docker 守护进程不可用，没有下载或启动这些服务器。未完成原生窗口可视验收。连接能力及限制见 docs/database-engines.md。
+
 ## 向导全量流式导出（2026-11-21，版本仍为 0.0.1）
 
 - 导出改为 ExportTransferTable 的后端流式通道，不走交互查询预览或前端整表数组；移除应用层 1,000 行、8 MB 数据、64 MB 文件及总单元格数限制。导入预览和普通查询的边界继续独立生效。

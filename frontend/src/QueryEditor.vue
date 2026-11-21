@@ -4,6 +4,7 @@ import {Play,Square,Plug,Database,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminResult,type Profile} from './api'
 import TableDataEditor from './TableDataEditor.vue'
 import {editableQuery,type EditableQuery} from './queryEditing'
+import {mysqlFamily,engineOf} from './databaseEngines'
 import type {CellValueRequest} from './cellValueTools'
 const props=defineProps<{profile:Profile;database:string;initialSQL:string;active:boolean;connected:boolean;sessionKey?:string}>()
 type Confirmation={title:string;body:string;label:string;action:()=>void|Promise<void>}
@@ -11,6 +12,8 @@ const emit=defineEmits<{dirty:[value:boolean];confirm:[request:Confirmation];des
 const sql=ref(props.initialSQL),editor=ref<HTMLTextAreaElement>(),executing=ref(false),starting=ref(false),childBusy=ref(false),childDirty=ref(false),stopping=ref(false),error=ref(''),message=ref(''),result=ref<AdminResult|null>(null)
 const query=shallowRef<EditableQuery>(),queryID=ref(''),tableEditor=ref<InstanceType<typeof TableDataEditor>>()
 const running=computed(()=>executing.value||starting.value||childBusy.value)
+const commandPlaceholder=computed(()=>engineOf(props.profile)==='redis'?'输入 JSON 数组命令，例如 ["GET","key"]':engineOf(props.profile)==='mongodb'?'输入 JSON 命令，例如 {"find":"users","limit":1000}':'在此输入 SQL，Ctrl+Enter 执行。')
+const commandHint=computed(()=>engineOf(props.profile)==='redis'?'使用 Redis 原生命令 JSON 数组；二进制参数可用 {"hex":"00ff"}。每次执行独立连接，不保留跨次事务或订阅。':engineOf(props.profile)==='mongodb'?'使用 MongoDB 原生 JSON 命令，命令名称应放在首项；结果以 Extended JSON 保留类型。':'使用当前数据库的原生 SQL；结果只读，每次执行使用独立会话，事务需在同次执行中完成。')
 watch([sql,running,childDirty],()=>emit('dirty',sql.value!==props.initialSQL||running.value||childDirty.value),{immediate:true,flush:'sync'})
 let task='',disposed=false,executedSQL=''
 async function focusEditor(){await nextTick();if(props.active&&!disposed)editor.value?.focus()}
@@ -23,9 +26,9 @@ async function run(text:string){
  if(disposed||!props.connected)return
  starting.value=true;query.value=undefined;childDirty.value=false;childBusy.value=false;error.value='';message.value='';result.value=null;executedSQL=text
  await nextTick();if(disposed)return
- const plan=editableQuery(text,props.database)
+ const plan=mysqlFamily(props.profile)?editableQuery(text,props.database):undefined
  if(plan){queryID.value=crypto.randomUUID();starting.value=true;query.value=plan;await nextTick();starting.value=false}
- else{starting.value=false;message.value='此查询结果仅供查看。可编辑结果需为包含直接字段的单表 SELECT。';await rawQuery(text)}
+ else{starting.value=false;message.value=mysqlFamily(props.profile)?'此查询结果仅供查看。可编辑结果需为包含直接字段的单表 SELECT。':'原生查询结果仅供查看。';await rawQuery(text)}
 }
 function execute(){
  if(running.value||!props.connected)return
@@ -48,9 +51,9 @@ onUnmounted(()=>{disposed=true;if(task)void api.CancelDatabaseTask(task).catch((
  </div>
  <p v-if="!connected" class="query-editor-disconnected" role="status">此查询的连接已关闭。重新打开“{{profile.name}}”后可继续执行，SQL 和已有结果仍保留。</p>
  <div class="query-editor-workspace" :class="{'has-editable-result':!!query}">
-  <textarea ref="editor" v-model="sql" class="query-editor-input" aria-label="SQL 编辑器" spellcheck="false" :readonly="running" placeholder="在此输入 SQL，Ctrl+Enter 执行选中内容或全部语句。"/>
-  <p v-if="!query" class="query-editor-note">SQL 批次每次执行使用独立会话，批次内事务须在同一次执行中完成。出错即停止，已提交操作不会自动回滚。<template v-if="profile.tunnelMode==='http'">PHP 中转需启用 BAJIU_TUNNEL_ALLOW_SQL=1；停止或关闭标签页只取消客户端等待，服务器可能仍继续执行。</template></p>
-  <div class="query-editor-feedback" aria-live="polite"><span v-if="running" role="status"><LoaderCircle :size="13" class="spin"/>正在执行…</span><p v-if="error" class="db-tools-error" role="alert">{{error}}</p><p v-if="message" class="db-tools-message" role="status">{{message}}</p></div>
+  <textarea ref="editor" v-model="sql" class="query-editor-input" aria-label="SQL 编辑器" spellcheck="false" :readonly="running" :placeholder="commandPlaceholder"/>
+  <p v-if="!query&&mysqlFamily(profile)" class="query-editor-note">SQL 批次每次执行使用独立会话，批次内事务须在同一次执行中完成。出错即停止，已提交操作不会自动回滚。<template v-if="profile.tunnelMode==='http'">PHP 中转需启用 BAJIU_TUNNEL_ALLOW_SQL=1；停止或关闭标签页只取消客户端等待，服务器可能仍继续执行。</template></p>
+  <p v-if="!mysqlFamily(profile)" class="query-editor-note">{{commandHint}}</p><div class="query-editor-feedback" aria-live="polite"><span v-if="running" role="status"><LoaderCircle :size="13" class="spin"/>正在执行…</span><p v-if="error" class="db-tools-error" role="alert">{{error}}</p><p v-if="message" class="db-tools-message" role="status">{{message}}</p></div>
   <TableDataEditor v-if="query" ref="tableEditor" :key="queryID" class="query-editable-result" :profile="profile" :database="query.database" :table="query.table" section="data" :query="query" :active="active" :connected="connected" :sessionKey="sessionKey??''" @dirty="childDirty=$event" @busy="childBusy=$event" @query-unavailable="unavailable" @design="emit('design',query.database,query.table)" @confirm="emit('confirm',$event)" @quick-edit="emit('quick-edit',$event)"/>
   <div v-else class="query-editor-results" :aria-busy="running">
    <section v-for="(r,index) in result?.results??[]" :key="index" class="query-result-set"><h3>结果 {{index+1}}<span v-if="!r.columns.length"> · 影响行数 {{r.affected}}</span><span v-if="r.truncated"> · 仅显示前 1,000 行</span></h3><div v-if="r.columns.length" class="query-result-table"><table><thead><tr><th v-for="(column,i) in r.columns" :key="i">{{column}}</th></tr></thead><tbody><tr v-for="(row,n) in r.rows" :key="n"><td v-for="(value,i) in row" :key="i" :class="{null:value===null}">{{value===null?'NULL':value}}</td></tr></tbody></table></div></section>

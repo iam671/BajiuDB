@@ -31,7 +31,7 @@ func NewApp() *App {
 	app := &App{startupErr: err, ctx: ctx, stop: stop, dialogs: map[string]*nativeDialog{}}
 	if err == nil {
 		app.configPath = filepath.Join(dir, "BajiuDB", "connections.json")
-		app.service = connections.New(connections.FileStore{Path: app.configPath}, connections.SystemSecrets{}, connections.MySQLDialer{})
+		app.service = connections.New(connections.FileStore{Path: app.configPath}, connections.SystemSecrets{}, connections.DatabaseDialer{})
 	}
 	return app
 }
@@ -151,4 +151,7 @@ func (a *App) ConfirmQuitApp() {
 }
 func (a *App) SelectCAFile() (string, error) {
 	return a.desktop.Dialog.OpenFile().SetTitle("选择 CA 证书").AddFilter("PEM 证书", "*.pem;*.crt;*.cer").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
+}
+func (a *App) SelectSQLiteFile() (string, error) {
+	return a.desktop.Dialog.OpenFile().SetTitle("选择 SQLite 数据库").AddFilter("SQLite 数据库", "*.db;*.sqlite;*.sqlite3;*.db3").AddFilter("所有文件", "*").AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
 }

@@ -1,8 +1,10 @@
 # Bajiu DB · 捌玖
 
-基于 Go + Wails 3 + Vue 3 的跨平台数据库桌面工具。当前版本为 **0.0.1：MySQL 管理与数据库工具**。
+基于 Go + Wails 3 + Vue 3 的跨平台数据库桌面工具。当前版本为 **0.0.1：多数据库连接与 MySQL 管理工具**。
 
 ## 已实现
+
+- 支持 Redis、MySQL、PostgreSQL、SQL Server、Oracle、SQLite、MariaDB、MongoDB 的真实连接驱动。新建连接可选类型、测试/保存/打开，旧配置默认 MySQL；新增类型提供对象浏览及原生查询，MySQL/MariaDB 保留已有管理功能。[连接配置和支持范围](docs/database-engines.md)。
 
 - 导入/导出向导支持 TXT、CSV、JSON、XML、XLS、XLSX、MDB、ACCDB、ODBC、DBF、SQLite DB，提供可搜索格式选择、来源表/工作表、字段映射与导入 SQL 预览。XLS/Access/DBF 需要本机 Windows 64 位 ACE，ODBC 需要对应驱动；六种内置格式可跨平台使用。[格式和限制](docs/data-transfer.md)。
 

@@ -12,6 +12,9 @@ type Profile struct {
 	Revision          int       `json:"revision"`
 	Name              string    `json:"name"`
 	GroupID           string    `json:"groupId,omitempty"`
+	Engine            string    `json:"engine,omitempty"`
+	FilePath          string    `json:"filePath,omitempty"`
+	AuthDatabase      string    `json:"authDatabase,omitempty"`
 	Host              string    `json:"host"`
 	Port              int       `json:"port"`
 	Username          string    `json:"username"`
@@ -74,6 +77,7 @@ type TestResult struct {
 
 // Numeric metadata is transmitted as text so unsigned BIGINT values stay exact.
 type DatabaseObject struct {
+	Query         string `json:"query,omitempty"`
 	Name          string `json:"name"`
 	Kind          string `json:"kind"`
 	Engine        string `json:"engine"`
@@ -92,6 +96,12 @@ type ObjectList struct {
 }
 
 func normalize(in Input, requireName bool) (Input, error) {
+	in.Engine = canonicalEngine(in.Engine)
+	if _, ok := engineCatalog[in.Engine]; !ok {
+		return in, errors.New("请选择支持的数据库类型")
+	}
+	in.FilePath = strings.TrimSpace(in.FilePath)
+	in.AuthDatabase = strings.TrimSpace(in.AuthDatabase)
 	in.Name = strings.TrimSpace(in.Name)
 	in.Host = strings.TrimSpace(in.Host)
 	in.Username = strings.TrimSpace(in.Username)
@@ -101,7 +111,7 @@ func normalize(in Input, requireName bool) (Input, error) {
 	if requireName && (in.Name == "" || len([]rune(in.Name)) > 80) {
 		return in, errors.New("连接名称需要填写，最多 80 个字")
 	}
-	if in.Host == "" || strings.ContainsAny(in.Host, "/\\\x00\r\n\t ") {
+	if in.Engine != "sqlite" && (in.Host == "" || strings.ContainsAny(in.Host, "/\\\x00\r\n\t ")) {
 		return in, errors.New("请填写主机名或 IP 地址，不要包含协议、路径或空格")
 	}
 	if strings.HasPrefix(in.Host, "[") && strings.HasSuffix(in.Host, "]") {
@@ -110,10 +120,10 @@ func normalize(in Input, requireName bool) (Input, error) {
 	if strings.Contains(in.Host, ":") && net.ParseIP(in.Host) == nil {
 		return in, errors.New("端口请填写在端口栏，主机栏只填写地址")
 	}
-	if in.Port < 1 || in.Port > 65535 {
+	if in.Engine != "sqlite" && (in.Port < 1 || in.Port > 65535) {
 		return in, errors.New("端口必须在 1 到 65535 之间")
 	}
-	if in.Username == "" {
+	if in.Engine != "sqlite" && in.Engine != "redis" && in.Engine != "mongodb" && in.Username == "" {
 		return in, errors.New("请填写数据库用户名")
 	}
 	if in.Timeout < 1 || in.Timeout > 30 {
@@ -133,6 +143,47 @@ func normalize(in Input, requireName bool) (Input, error) {
 	}
 	if err := normalizeTunnel(&in); err != nil {
 		return in, err
+	}
+	if !mysqlFamily(in.Engine) && in.TunnelMode != "direct" {
+		return in, errors.New("该数据库类型当前使用直连；SSH/PHP 隧道适用于 MySQL/MariaDB")
+	}
+	if in.Engine == "sqlite" {
+		if in.FilePath == "" || strings.ContainsRune(in.FilePath, 0) || len(in.FilePath) > 4096 {
+			return in, errors.New("请选择有效的 SQLite 数据库文件")
+		}
+		if in.TLSMode != "disabled" {
+			return in, errors.New("SQLite 本地文件不使用 TLS")
+		}
+		in.Host = ""
+		in.Port = 0
+		in.Username = ""
+		in.Database = "main"
+		in.Password = ""
+		in.PasswordAction = "replace"
+		in.RememberPassword = false
+	}
+	if in.Engine == "postgresql" && in.Database == "" {
+		in.Database = "postgres"
+	}
+	if in.Engine == "sqlserver" && in.Database == "" {
+		in.Database = "master"
+	}
+	if in.Engine == "oracle" && in.Database == "" {
+		return in, errors.New("请填写 Oracle 服务名（Service Name）")
+	}
+	if in.Engine == "redis" {
+		if in.Database == "" {
+			in.Database = "0"
+		}
+		if _, err := redisIndex(in.Database); err != nil {
+			return in, err
+		}
+	}
+	if len(in.AuthDatabase) > 256 || strings.ContainsRune(in.AuthDatabase, 0) {
+		return in, errors.New("认证数据库无效")
+	}
+	if in.Engine == "mongodb" && in.AuthDatabase == "" {
+		in.AuthDatabase = "admin"
 	}
 	return in, nil
 }

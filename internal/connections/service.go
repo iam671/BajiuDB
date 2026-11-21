@@ -96,6 +96,9 @@ func (s *Service) Save(raw Input) (Profile, error) {
 			return Profile{}, errors.New("此连接已被删除，请刷新列表")
 		}
 		old = s.records[index]
+		if canonicalEngine(old.Engine) != in.Engine {
+			return Profile{}, errors.New("已保存连接不能更改数据库类型，请新建连接")
+		}
 		if old.Revision != in.Revision {
 			return Profile{}, errors.New("连接配置已变化，请重新选择连接后编辑")
 		}
@@ -241,7 +244,7 @@ func (s *Service) Test(in Input) (TestResult, error) {
 		return TestResult{}, err
 	}
 	defer db.Close()
-	return TestResult{Success: true, Message: "连接成功，已验证登录和数据库访问", ServerVersion: info.ServerVersion, LatencyMS: info.LatencyMS}, nil
+	return TestResult{Success: true, Message: "连接成功，已验证服务器响应", ServerVersion: info.ServerVersion, LatencyMS: info.LatencyMS}, nil
 }
 
 func (s *Service) Connect(in Input) (SessionInfo, error) {
@@ -250,6 +253,10 @@ func (s *Service) Connect(in Input) (SessionInfo, error) {
 	if i < 0 || s.records[i].Revision != in.Revision {
 		s.mu.Unlock()
 		return SessionInfo{}, errors.New("请先保存当前连接配置")
+	}
+	if canonicalEngine(s.records[i].Engine) != canonicalEngine(in.Engine) {
+		s.mu.Unlock()
+		return SessionInfo{}, errors.New("连接类型与已保存配置不一致，请重新选择连接")
 	}
 	s.epoch[in.ID]++
 	epoch := s.epoch[in.ID]
