@@ -1,0 +1,106 @@
+name: Publish desktop release
+run-name: Publish Bajiu DB v0.0.1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-v0.0.1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: source
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      GOTOOLCHAIN: local
+      npm_config_audit: 'false'
+      npm_config_fund: 'false'
+    steps:
+      - name: Check out the immutable release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/tags/v0.0.1
+          path: source
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: source/go.sum
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.20.0'
+          cache: npm
+          cache-dependency-path: source/frontend/package-lock.json
+      - name: Set up archive tooling
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Build five desktop packages
+        run: |
+          ./scripts/package-all.ps1
+      - name: Validate and publish release attachments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = @('windows-x64.zip', 'linux-x64.tar.gz', 'linux-arm64.tar.gz', 'macos-x64.zip', 'macos-arm64.zip')
+          $assets = @()
+          foreach ($target in $targets) {
+            $archive = Join-Path $PWD "dist/BajiuDB-0.0.1-$target"
+            $stem = $target -replace '\.(?:tar\.gz|zip)$', ''
+            $checksum = Join-Path $PWD "dist/BajiuDB-0.0.1-$stem.sha256"
+            $expected = ((Get-Content -LiteralPath $checksum -Raw) -split '\s+')[0]
+            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+              throw "Archive checksum mismatch: $target"
+            }
+            $assets += $archive, $checksum
+          }
+          $notes = Join-Path $env:RUNNER_TEMP 'bajiu-release-notes.md'
+          @'
+          ## Bajiu DB v0.0.1
+
+          轻量级桌面数据库管理工具，基于 Go + Wails + Vue。
+
+          - 支持 MySQL、MariaDB、PostgreSQL、SQL Server、Oracle、SQLite、Redis、MongoDB 连接与对应图标。
+          - MySQL/MariaDB 提供数据编辑、表设计、SQL 查询、事务及导入导出工具；其它引擎以浏览和原生查询为主。
+          - 包含中英文 Markdown 文档及截图。每个平台包附 SHA-256 校验文件。
+
+          | 系统 / Platform | 架构 / Architecture |
+          | --- | --- |
+          | Windows | x64 |
+          | Linux | x64 / ARM64 |
+          | macOS | Intel x64 / Apple Silicon ARM64 |
+
+          **运行条件：** Windows 需要 WebView2；Linux 需要 GTK4、WebKitGTK 6.0。Linux/macOS 是 Wails 实验性 purego 交叉编译包，尚未实机运行验证；Mac .app 未做 Apple Developer ID 签名或公证。
+
+          **English:** A lightweight desktop database manager built with Go, Wails and Vue. Eight engines share connection management; full table editing/design and transfer tools currently target MySQL/MariaDB. Linux/macOS packages are experimental purego cross-builds, not native runtime-verified releases. Linux requires GTK4/WebKitGTK 6.0; Mac bundles have no Developer ID signature or notarization. Verify the archive against its matching `.sha256` file.
+          '@ | Set-Content -LiteralPath $notes -Encoding utf8NoBOM
+          & gh release view v0.0.1 --repo $env:RELEASE_REPOSITORY --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) {
+            & gh release create v0.0.1 --repo $env:RELEASE_REPOSITORY --verify-tag --draft --title 'Bajiu DB v0.0.1' --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Release draft creation failed.' }
+          }
+          & gh release upload v0.0.1 @assets --repo $env:RELEASE_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release attachment upload failed; release remains a draft if newly created.' }
+          & gh release edit v0.0.1 --repo $env:RELEASE_REPOSITORY --title 'Bajiu DB v0.0.1' --notes-file $notes --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+          & gh release view v0.0.1 --repo $env:RELEASE_REPOSITORY --json url,tagName,isDraft,assets
+          if ($LASTEXITCODE -ne 0) { throw 'Published release verification failed.' }
