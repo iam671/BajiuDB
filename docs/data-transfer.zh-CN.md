@@ -65,4 +65,4 @@ WKB 与 SRID 的转换依据 [MySQL WKB 构造函数](https://dev.mysql.com/doc/
 
 ## 平台范围
 
-TXT/CSV/JSON/XML/XLSX/SQLite 的核心代码可在 Windows、Linux、macOS 构建。当前发布包和 ACE/ODBC 适配器为 Windows x64；其他平台明确显示系统驱动格式不可用，不伪装为文件格式支持。
+TXT/CSV/JSON/XML/XLSX/SQLite 的核心代码可在 Windows、Linux、macOS 构建。已生成 Windows 发布包及实验性 Linux/macOS 交叉编译包；ACE/ODBC 适配器仍限 Windows x64，其它平台明确显示系统驱动格式不可用。交叉编译不代表完成目标系统运行验证，见[发布构建](builds.zh-CN.md)。

@@ -65,4 +65,4 @@ Files/destination data sources hold encoded text, not native BLOB/spatial column
 
 ## Platforms
 
-TXT/CSV/JSON/XML/XLSX/SQLite core readers/writers are designed for Windows/Linux/macOS builds. Current release packaging and ACE/ODBC adapters are Windows x64. Other platforms explicitly report system-driver formats as unavailable. This does not imply that macOS/Linux desktop builds have already been validated.
+TXT/CSV/JSON/XML/XLSX/SQLite core readers/writers are designed for Windows/Linux/macOS builds. Windows packages and experimental Linux/macOS cross-builds are produced; ACE/ODBC adapters remain Windows x64 only. Other platforms explicitly report system-driver formats as unavailable. Cross-compilation does not validate macOS/Linux desktop runtime behavior; see [release builds](builds.md).

@@ -11,7 +11,7 @@
 | Wails | Go package 3.1.0 and JavaScript runtime 3.1.0 |
 | Frontend | Vue 3, TypeScript and Vite; exact dependency resolutions are in `frontend/package-lock.json` |
 
-Go can download the selected toolchain when allowed. Install the native Wails dependencies for your OS; Windows uses WebView2, macOS uses system WebKit and Linux needs its platform development libraries. The current checked packaging workflow is Windows x64; macOS/Linux desktop builds and execution remain unverified.
+Go can download the selected toolchain when allowed. Install the native Wails dependencies for your OS; Windows uses WebView2, macOS uses system WebKit and Linux needs its platform development libraries. The Windows packaging flow is native; additional Linux/macOS experimental purego cross-builds pass compilation but remain unverified at runtime. Build all five targets on Windows with `./scripts/package-all.ps1` and Python 3.11+. See [release builds](builds.md).
 
 ## Clone and run
 

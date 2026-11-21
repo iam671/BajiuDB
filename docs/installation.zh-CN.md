@@ -19,7 +19,7 @@ Get-Content ./BajiuDB-0.0.1-windows-x64.sha256
 
 ## 其它平台
 
-Go、Wails、Vue 为 Windows/macOS/Linux 构建提供基础。当前发布流程生成 Windows x64 包，macOS/Linux 桌面构建及运行尚待验证。需在目标系统安装 Wails 原生依赖并构建，不能直接运行 Windows EXE。详见[开发指南](development.zh-CN.md)。
+实验性 Linux x64/ARM64 与 macOS Intel/Apple Silicon 包通过 Wails purego 交叉编译，已检查编译和归档，尚未在目标系统启动。Linux 需要 GTK4/WebKitGTK 6.0；macOS 提供未做 Developer ID 签名/公证的 `.app`。包名和条件见[发布构建](builds.zh-CN.md)，本机构建见[开发指南](development.zh-CN.md)。
 
 ## 连接设置
 

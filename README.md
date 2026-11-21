@@ -26,7 +26,7 @@ Bajiu DB is an open-source desktop database manager focused on everyday work: or
 - **A familiar workspace.** Connection groups on the left, closable working tabs in the center, and object information and DDL on the right.
 - **Local configuration.** Save passwords in the system credential store. The application has no built-in cloud synchronization, telemetry or automatic updates.
 
-Current version: **0.0.1**. The interface is currently in Simplified Chinese. Documentation is available in English and Chinese. Windows x64 is the currently packaged platform; macOS/Linux desktop builds and runtime behavior still need validation.
+Current version: **0.0.1**. The interface is currently in Simplified Chinese. Documentation is available in English and Chinese. Windows x64 packages and experimental Linux/macOS cross-builds are available; Linux/macOS desktop behavior still needs native validation. See [release builds](docs/builds.md).
 
 ## Screenshots
 
@@ -94,7 +94,7 @@ PostgreSQL, SQL Server, Oracle, SQLite, Redis and MongoDB currently display quer
 - [GitHub releases](https://github.com/iam671/BajiuDB/releases)
 - [Gitee releases](https://gitee.com/sixeventy-one/bajiu-db/releases)
 
-If no binary is attached to a release, [build from source](docs/development.md). The expected Windows archive name is `BajiuDB-0.0.1-windows-x64.zip`.
+If no binary is attached to a release, [build from source](docs/development.md). The Windows archive is `BajiuDB-0.0.1-windows-x64.zip`; Linux x64/ARM64 and macOS Intel/Apple Silicon packages are listed in [release builds](docs/builds.md).
 
 1. Extract the Windows package and launch `BajiuDB.exe`. Install Microsoft WebView2 Runtime if it is missing.
 2. Select **连接 (Connection)**, choose a database engine, then enter its connection settings.
@@ -124,6 +124,7 @@ All project guides are versioned Markdown files in this repository. No external 
 
 | Topic | English | 简体中文 |
 | --- | --- | --- |
+| Release builds and platform requirements | [Read](docs/builds.md) | [阅读](docs/builds.zh-CN.md) |
 | Documentation index | [Read](docs/README.md) | [阅读](docs/README.zh-CN.md) |
 | Installation and configuration | [Read](docs/installation.md) | [阅读](docs/installation.zh-CN.md) |
 | Everyday usage | [Read](docs/user-guide.md) | [阅读](docs/user-guide.zh-CN.md) |

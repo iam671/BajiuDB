@@ -19,7 +19,7 @@ For updates, finish or discard unsaved work, close the old app and open the new 
 
 ## Other platforms
 
-Go, Wails and Vue provide the basis for Windows/macOS/Linux builds. The current release workflow produces Windows x64 packages. macOS/Linux desktop builds and runtime behavior have not yet been validated; build on the target OS with its Wails native dependencies rather than assuming the Windows executable works there. See [development](development.md).
+Experimental Linux x64/ARM64 and macOS Intel/Apple Silicon packages are cross-compiled using Wails purego. They passed compile/archive checks, but have not been launched on those systems. Linux requires GTK4/WebKitGTK 6.0; macOS packages are unsigned/unnotarized `.app` bundles. See [release builds](builds.md) for exact filenames and runtime requirements, or [development](development.md) to build locally.
 
 ## Connection settings
 

@@ -11,7 +11,7 @@
 | Wails | Go 包 3.1.0，JavaScript runtime 3.1.0 |
 | 前端 | Vue 3、TypeScript、Vite，精确依赖版本见 `frontend/package-lock.json` |
 
-允许联网时 Go 可自动下载指定工具链。需安装目标系统对应的 Wails 原生依赖：Windows 使用 WebView2，macOS 使用系统 WebKit，Linux 需要相应开发库。当前已检查的打包流程为 Windows x64，macOS/Linux 桌面构建和运行仍待验证。
+允许联网时 Go 可自动下载指定工具链。需安装目标系统对应的 Wails 原生依赖：Windows 使用 WebView2，macOS 使用系统 WebKit，Linux 需要相应开发库。Windows 使用原生打包流程，另有编译通过但运行待验证的 Linux/macOS 实验性 purego 包。在 Windows 准备 Python 3.11+ 后可执行 `./scripts/package-all.ps1` 构建五个目标，详见[发布构建](builds.zh-CN.md)。
 
 ## 克隆与运行
 

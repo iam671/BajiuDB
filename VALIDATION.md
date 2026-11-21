@@ -1,3 +1,10 @@
+## Windows / Linux / macOS 发布构建（2026-11-21，版本仍为 0.0.1）
+
+- Windows x64 原生生产构建通过；通过 Wails 3.1.0 的实验性 purego 后端，以 CGO_ENABLED=0、production,purego 编译 Linux amd64/arm64 和 macOS amd64/arm64，四个真实目标二进制均成功。没有使用 server 标签替代桌面程序，也没有改动应用功能或凭据。
+- 新增 package-all.ps1 与 package-unix.py，可复现五目标打包；Mac 使用带版本/Bundle ID/图标的 .app ZIP，Linux 使用 tar.gz。沿用固定同版本产物名称，先暂存验证再替换，清理范围只在构建/发布目录。
+- 四个真实二进制的 ELF64/Mach-O 64 及 CPU 检查通过，四次错误 CPU 请求均被拒绝；PowerShell 语法检查通过。五个归档的 SHA-256、包内二进制哈希、文档/许可材料、Linux/Mac 执行权限、Mac plist/ICNS 与版本一致性检查通过。Windows 前端 TypeScript/生产构建通过。
+- Linux 包依赖目标系统 GTK4/WebKitGTK 6.0，运行库不随包分发；Mac .app 部署目标为 12+，没有 Apple Developer ID 签名或公证。当前环境未运行 Linux/macOS 桌面程序，编译和归档检查不代表这些系统的端到端验证。未连接业务数据库，未重跑与本次打包无关的数据库/界面套件。两种语言的平台说明已同步。
+
 ## 开源中英文文档与赞助入口（2026-11-21，版本仍为 0.0.1）
 
 - README 改为英文首页与 README.zh-CN.md 中文首页，使用原创项目说明，按当前八引擎实际能力划分；提供 GitHub/Gitee 源码、发布页、反馈链接及本地支付宝/微信原图。没有外部文档空间依赖，不宣称其它引擎拥有尚未实现的 MySQL 管理能力。

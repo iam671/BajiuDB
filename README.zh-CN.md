@@ -26,7 +26,7 @@ Bajiu DB 是一款开源桌面数据库管理工具，专注连接、查询、�
 - **清晰的工作布局**：左侧连接分组，中间可关闭工作标签，右侧对象信息与 DDL，减少来回切换。
 - **配置保存在本机**：密码交给系统凭据库，不提供内置云同步、遥测或自动更新。
 
-当前版本为 **0.0.1**，应用界面为简体中文，文档提供中英文版本。当前提供 Windows x64 打包流程；macOS/Linux 桌面构建及运行效果仍待验证。
+当前版本为 **0.0.1**，应用界面为简体中文，文档提供中英文版本。已提供 Windows x64 发布包及实验性 Linux/macOS 交叉编译包；Linux/macOS 桌面运行仍需在目标系统验证，详见[发布构建](docs/builds.zh-CN.md)。
 
 ## 界面截图
 
@@ -94,7 +94,7 @@ PostgreSQL、SQL Server、Oracle、SQLite、Redis、MongoDB 的查询结果当�
 - [GitHub 发布页](https://github.com/iam671/BajiuDB/releases)
 - [Gitee 发布页](https://gitee.com/sixeventy-one/bajiu-db/releases)
 
-若发布页尚未附带安装包，可以[从源码构建](docs/development.zh-CN.md)。Windows 便携包名称为 `BajiuDB-0.0.1-windows-x64.zip`。
+若发布页尚未附带安装包，可以[从源码构建](docs/development.zh-CN.md)。Windows 便携包名称为 `BajiuDB-0.0.1-windows-x64.zip`，Linux x64/ARM64 与 macOS Intel/Apple Silicon 的包名及条件见[发布构建](docs/builds.zh-CN.md)。
 
 1. 解压便携包，运行 `BajiuDB.exe`；缺少 WebView2 时先安装 Microsoft WebView2 Runtime。
 2. 点击“连接”，选择数据库类型，再填写连接参数。
@@ -124,6 +124,7 @@ go run .
 
 | 内容 | 简体中文 | English |
 | --- | --- | --- |
+| 发布构建与平台条件 | [阅读](docs/builds.zh-CN.md) | [Read](docs/builds.md) |
 | 文档目录 | [阅读](docs/README.zh-CN.md) | [Read](docs/README.md) |
 | 安装与配置 | [阅读](docs/installation.zh-CN.md) | [Read](docs/installation.md) |
 | 日常使用 | [阅读](docs/user-guide.zh-CN.md) | [Read](docs/user-guide.md) |

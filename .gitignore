@@ -6,3 +6,4 @@
 *.syso
 *.test.exe
 /.local/
+__pycache__/
