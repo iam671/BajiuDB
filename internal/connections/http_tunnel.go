@@ -17,6 +17,8 @@ import (
 
 const tunnelProtocol = "bajiu-mysql-v1"
 
+var errTunnelResponseTooLarge = errors.New("中转单批结果超过允许大小")
+
 type httpDatabase struct {
 	in       Input
 	password string
@@ -97,6 +99,9 @@ func (d *httpDatabase) call(ctx context.Context, operation, database, kind, tabl
 		return errors.New("无法访问 PHP 中转，请检查地址、HTTPS 证书和网络")
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusRequestEntityTooLarge && operation == "admin" {
+		return errTunnelResponseTooLarge
+	}
 	if response.StatusCode == 401 || response.StatusCode == 403 {
 		if response.StatusCode == 403 && operation == "admin" && len(admin) > 0 && (admin[0].Operation == "query" || admin[0].Operation == "create" || admin[0].Operation == "alter" || admin[0].Operation == "drop") {
 			return errors.New("PHP 中转拒绝 SQL 操作，请检查 BAJIU_TUNNEL_ALLOW_SQL=1、令牌及主机白名单")
@@ -111,8 +116,11 @@ func (d *httpDatabase) call(ctx context.Context, operation, database, kind, tabl
 		limit = 64 << 20
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
-	if err != nil || len(data) > limit {
-		return errors.New("中转响应无法读取或超过允许大小")
+	if err != nil {
+		return errors.New("中转响应无法读取")
+	}
+	if len(data) > limit {
+		return errTunnelResponseTooLarge
 	}
 	var reply struct {
 		Protocol string          `json:"protocol"`

@@ -62,25 +62,74 @@ func (a *App) SaveTransferData(task string, options datafiles.Options, data data
 	}
 	return saveTransferFile(ctx, path, options, data)
 }
+
+type TransferExportResult struct {
+	Path string `json:"path"`
+	Rows int64  `json:"rows"`
+}
+
+// ExportTransferTable reads and writes in Go; no table data crosses the WebView.
+func (a *App) ExportTransferTable(task, id, database, table string, options datafiles.Options) (TransferExportResult, error) {
+	if a.startupErr != nil {
+		return TransferExportResult{}, a.startupErr
+	}
+	ctx, finish, err := a.adminTaskContext(task)
+	if err != nil {
+		return TransferExportResult{}, err
+	}
+	defer finish()
+	choose := func() (string, error) {
+		return a.desktop.Dialog.SaveFile().SetFilename(datafiles.SafeFilename(options.Table, options.Format)).AddFilter(strings.ToUpper(options.Format)+" 文件", "*"+datafiles.Extension(options.Format)).AttachToWindow(a.desktop.Window.Current()).PromptForSingleSelection()
+	}
+	return exportTransferTable(ctx, options, choose, func(header func([]string) error, row func([]*string) error) error {
+		return a.service.ExportTable(ctx, id, database, table, header, row)
+	})
+}
+func exportTransferTable(ctx context.Context, options datafiles.Options, choose func() (string, error), source datafiles.Source) (TransferExportResult, error) {
+	result := TransferExportResult{}
+	if !datafiles.ValidFormat(options.Format) {
+		return result, errors.New("数据格式无效")
+	}
+	if options.Format == "odbc" {
+		count, err := datafiles.WriteStream(ctx, options, source)
+		if err != nil {
+			return result, err
+		}
+		return TransferExportResult{Path: "ODBC / " + options.Table, Rows: count}, nil
+	}
+	path, err := choose()
+	if err != nil || path == "" {
+		return result, err
+	}
+	if !strings.EqualFold(filepath.Ext(path), datafiles.Extension(options.Format)) {
+		return result, errors.New("文件扩展名与所选格式不一致")
+	}
+	var count int64
+	saved, err := publishTransferFile(ctx, path, options, func(o datafiles.Options) error {
+		var e error
+		count, e = datafiles.WriteStream(ctx, o, source)
+		return e
+	})
+	if err != nil {
+		return result, err
+	}
+	return TransferExportResult{Path: saved, Rows: count}, nil
+}
 func saveTransferFile(ctx context.Context, path string, options datafiles.Options, data datafiles.Data) (string, error) {
+	return publishTransferFile(ctx, path, options, func(o datafiles.Options) error { return datafiles.Write(ctx, o, data) })
+}
+func publishTransferFile(ctx context.Context, path string, options datafiles.Options, write func(datafiles.Options) error) (string, error) {
 	stage, err := os.MkdirTemp(filepath.Dir(path), ".bajiu-transfer-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(stage)
 	options.Path = filepath.Join(stage, "data"+datafiles.Extension(options.Format))
-	if err = datafiles.Write(ctx, options, data); err != nil {
+	if err = write(options); err != nil {
 		return "", err
 	}
 	if err = ctx.Err(); err != nil {
 		return "", err
-	}
-	info, err := os.Stat(options.Path)
-	if err != nil {
-		return "", err
-	}
-	if info.Size() > datafiles.MaxFileBytes {
-		return "", errors.New("导出文件超过 64 MB")
 	}
 	f, err := os.OpenFile(options.Path, os.O_RDWR, 0600)
 	if err != nil {

@@ -27,17 +27,6 @@ function transferKind(type:string){
  if(/^(?:geometry|point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection)\b/i.test(type))return 'spatial'
  return 'text'
 }
-// Encode on the server before values cross a text/JSON bridge. Never infer bytes
-// from queryResult's display strings, which may already have lost type information.
-export function transferSelectSQL(table:string,columns:(string|null)[][]){
- if(!columns.length)throw new Error('请先成功读取表字段后再导出')
- return 'SELECT '+columns.map(column=>{
-  const name=quoteIdentifier(column[0]??''),kind=transferKind(column[1]??'')
-  if(kind==='binary')return "CONCAT('0x',HEX("+name+')) AS '+name
-  if(kind==='spatial')return "CONCAT('SRID=',ST_SRID("+name+"),';WKB=0x',HEX(ST_AsWKB("+name+'))) AS '+name
-  return name
- }).join(', ')+' FROM '+quoteIdentifier(table)+' LIMIT 1001'
-}
 function transferLiteral(value:string,type:string,name:string){
  const kind=transferKind(type)
  if(kind==='binary'){

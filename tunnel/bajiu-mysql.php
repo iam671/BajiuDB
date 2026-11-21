@@ -87,5 +87,9 @@ try {
 } catch(mysqli_sql_exception $error) {
     if($db){try{$db->close();}catch(Throwable $ignored){}}if($caFile)@unlink($caFile);reply(false,null,(int)$error->getCode());
 } catch(Throwable $error) {
-    if($db){try{$db->close();}catch(Throwable $ignored){}}if($caFile)@unlink($caFile);reply(false,null,0);
+    if($db){try{$db->close();}catch(Throwable $ignored){}}if($caFile)@unlink($caFile);
+    // A safe typed size signal lets the desktop retry a smaller read-only export
+    // page. Never expose arbitrary exception messages or connection parameters.
+    if($error instanceof RuntimeException && $error->getMessage()==='Result exceeds 8 MB')reply(false,null,0,413);
+    reply(false,null,0);
 }

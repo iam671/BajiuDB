@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,14 +44,29 @@ func (b *cappedOutput) Write(p []byte) (int, error) {
 	}
 	return b.Buffer.Write(p)
 }
-func driverCall(ctx context.Context, operation string, o Options, d Data) (driverResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+
+type driverStreamRequest struct {
+	Path    string `json:"path"`
+	Lengths []int  `json:"lengths"`
+	Count   int64  `json:"count"`
+	Digest  string `json:"digest"`
+}
+
+func driverCall(ctx context.Context, operation string, o Options, d Data, stream ...*driverStreamRequest) (driverResponse, error) {
+	deadline := 2 * time.Minute
+	var info *driverStreamRequest
+	if len(stream) > 0 {
+		info = stream[0]
+		deadline = 24 * time.Hour
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	input, err := json.Marshal(struct {
-		Operation string  `json:"operation"`
-		Options   Options `json:"options"`
-		Data      Data    `json:"data"`
-	}{operation, o, d})
+		Operation string               `json:"operation"`
+		Options   Options              `json:"options"`
+		Data      Data                 `json:"data"`
+		Stream    *driverStreamRequest `json:"stream,omitempty"`
+	}{operation, o, d, info})
 	if err != nil {
 		return driverResponse{}, err
 	}
@@ -68,7 +84,7 @@ func driverCall(ctx context.Context, operation string, o Options, d Data) (drive
 			return reported, errors.New(reported.Error)
 		}
 		if ctx.Err() != nil {
-			return driverResponse{}, errors.New("数据驱动操作已停止或超过两分钟，请检查驱动和数据源")
+			return driverResponse{}, errors.New("数据驱动操作已停止或超时，请检查驱动和数据源")
 		}
 		return driverResponse{}, fmt.Errorf("无法运行系统数据驱动，请检查 Windows PowerShell/.NET：%w", err)
 	}
@@ -99,6 +115,13 @@ func driverRead(ctx context.Context, o Options) (Data, error) {
 	return r.Data, e
 }
 func driverWrite(ctx context.Context, o Options, d Data) error {
+	if err := prepareDriverFile(o); err != nil {
+		return err
+	}
+	_, e := driverCall(ctx, "write", o, d)
+	return e
+}
+func prepareDriverFile(o Options) error {
 	if o.Format == "mdb" || o.Format == "accdb" {
 		blank := emptyMDB
 		if o.Format == "accdb" {
@@ -117,6 +140,60 @@ func driverWrite(ctx context.Context, o Options, d Data) error {
 			return closeErr
 		}
 	}
-	_, e := driverCall(ctx, "write", o, d)
-	return e
+	return nil
+}
+func driverWriteStream(ctx context.Context, o Options, source Source) error {
+	spool, err := os.CreateTemp("", "bajiu-export-*.jsonl")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(spool.Name())
+	defer spool.Close()
+	encoder := json.NewEncoder(spool)
+	info := &driverStreamRequest{Path: spool.Name()}
+	var names []string
+	var digest [32]byte
+	err = source(func(columns []string) error {
+		names = append([]string{}, columns...)
+		info.Lengths = make([]int, len(names))
+		return nil
+	}, func(row []*string) error {
+		for i, v := range row {
+			if v != nil {
+				n := 0
+				for _, r := range *v {
+					n++
+					if r > 0xffff {
+						n++
+					}
+				}
+				if n > info.Lengths[i] {
+					info.Lengths[i] = n
+				}
+			}
+		}
+		addRowDigest(&digest, row)
+		info.Count++
+		return encoder.Encode(struct {
+			Values []*string `json:"values"`
+		}{row})
+	})
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return errors.New("导出没有返回字段列表")
+	}
+	if err = spool.Close(); err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	info.Digest = base64.StdEncoding.EncodeToString(digest[:])
+	if err = prepareDriverFile(o); err != nil {
+		return err
+	}
+	_, err = driverCall(ctx, "stream-write", o, Data{Columns: names}, info)
+	return err
 }

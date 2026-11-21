@@ -42,6 +42,7 @@ type Bridge = {
   InspectTransferSource(task:string,options:TransferOptions):Promise<string[]>;
   ReadTransferSource(task:string,options:TransferOptions):Promise<TransferData>;
   SaveTransferData(task:string,options:TransferOptions,data:TransferData):Promise<string>;
+  ExportTransferTable(task:string,id:string,database:string,table:string,options:TransferOptions):Promise<{path:string;rows:number}>;
   OpenWindowDialog(state:WindowDialog):Promise<void>;GetWindowDialog(id:string):Promise<WindowDialog>;UpdateWindowDialog(state:WindowDialog):Promise<void>;CloseWindowDialog(id:string):Promise<void>;SendWindowDialogAction(action:DialogAction):Promise<void>;
 }
 declare global { interface Window {go?:{main:{App:Bridge}}} }

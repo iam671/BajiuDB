@@ -18,7 +18,8 @@ try {
         exit 0
     }
     $format = [string]$options.format
-    $writing = $request.operation -eq 'write'
+    $streaming = $request.operation -eq 'stream-write'
+    $writing = $request.operation -eq 'write' -or $streaming
     if ($format -eq 'odbc') {
         if (-not $options.connectionString -or $options.connectionString.Length -gt 8192) { throw '请输入有效的 ODBC 连接字符串' }
         $connection = [Data.Odbc.OdbcConnection]::new([string]$options.connectionString)
@@ -59,6 +60,24 @@ try {
         if ($item.schema) { return (Quote $item.schema) + '.' + (Quote $item.name) }
         return Quote $item.name
     }
+    function AddRowDigest([byte[]]$sum,[object[]]$values) {
+        $hash=[Security.Cryptography.SHA256]::Create()
+        try {
+            foreach($value in $values){
+                if($null -eq $value){$tag=[byte[]]@(0);[void]$hash.TransformBlock($tag,0,1,$tag,0);continue}
+                $tag=[byte[]]@(1);[void]$hash.TransformBlock($tag,0,1,$tag,0)
+                $raw=[Text.Encoding]::UTF8.GetBytes([string]$value);$length=[BitConverter]::GetBytes([UInt64]$raw.Length)
+                [void]$hash.TransformBlock($length,0,8,$length,0);[void]$hash.TransformBlock($raw,0,$raw.Length,$raw,0)
+            }
+            [void]$hash.TransformFinalBlock([byte[]]@(),0,0);$carry=0
+            for($di=0;$di -lt 32;$di++){$n=[int]$sum[$di]+[int]$hash.Hash[$di]+$carry;$sum[$di]=[byte]($n-band 255);$carry=$n-shr 8}
+        } finally {$hash.Dispose()}
+    }
+    function InputRows {
+        if(-not $streaming){foreach($record in $data.rows){Write-Output -NoEnumerate $record};return}
+        $inputFile=[IO.StreamReader]::new([string]$request.stream.path,[Text.Encoding]::UTF8)
+        try{while($null -ne ($line=$inputFile.ReadLine())){$record=ConvertFrom-Json -InputObject $line;Write-Output -NoEnumerate ([object[]]$record.values)}}finally{$inputFile.Dispose()}
+    }
     function ReadRows([string]$query) {
         $command = $connection.CreateCommand(); $command.CommandTimeout = 60; $command.CommandText = $query
         if ($transaction) { $command.Transaction=$transaction }
@@ -66,7 +85,7 @@ try {
         try {
             if ($reader.FieldCount -gt 1024) { throw '来源列数超过 1,024' }
             $names = @(); for ($i=0; $i -lt $reader.FieldCount; $i++) { $names += $reader.GetName($i) }
-            $rows = [Collections.Generic.List[object]]::new(); $size=0
+            $rows = [Collections.Generic.List[object]]::new(); $size=0;[long]$readCount=0;$sum=[byte[]]::new(32)
             while ($reader.Read()) {
                 $values = @()
                 for ($i=0; $i -lt $reader.FieldCount; $i++) {
@@ -81,11 +100,12 @@ try {
                         if ($value -ceq '\E') { $value='' }
                         elseif ($value.StartsWith('\\') -and $value.TrimStart([char]92) -cin @('N','E')) { $value=$value.Substring(1) }
                     }
-                    $values += $value; $size += [Text.Encoding]::UTF8.GetByteCount($value)
+                    $values += $value; if(-not $streaming){$size += [Text.Encoding]::UTF8.GetByteCount($value)}
                 }
-                $rows.Add($values)
-                if ($rows.Count -gt 10000 -or $rows.Count*$reader.FieldCount -gt 200000 -or $size -gt 8388608) { throw '来源数据超过导入上限，已停止而非截断' }
+                if($streaming){AddRowDigest $sum ([object[]]$values);$readCount++}
+                else{$rows.Add($values);if ($rows.Count -gt 10000 -or $rows.Count*$reader.FieldCount -gt 200000 -or $size -gt 8388608) { throw '来源数据超过导入上限，已停止而非截断' }}
             }
+            if($streaming){return @{columns=$names;count=$readCount;digest=[Convert]::ToBase64String($sum)}}
             return @{ columns=$names; rows=$rows.ToArray() }
         } finally { $reader.Dispose(); $command.Dispose() }
     }
@@ -106,7 +126,6 @@ try {
     if ($format -eq 'dbf') {
         $name = [IO.Path]::GetFileNameWithoutExtension([string]$options.path)
         foreach ($column in $data.columns) { if ($column -notmatch '^[A-Za-z_][A-Za-z0-9_]{0,9}$') { throw 'DBF 字段名须为 1–10 位 ASCII 字母、数字或下划线，请改用其它格式保留长字段名' } }
-        foreach ($row in $data.rows) { foreach ($value in $row) { if ($null -eq $value -or [Text.Encoding]::Default.GetByteCount([string]$value) -gt 254 -or $value -match '[\x00-\x1F]') { throw 'DBF 仅导出不含 NULL、控制字符且在系统代码页下不超过 254 字节的值；请使用 XLSX/JSON 保留原值' } } }
     }
     $qualified = Quote $name
     if ($format -eq 'odbc') {
@@ -118,7 +137,9 @@ try {
         $column=$data.columns[$ci]
         $type = 'MEMO'
         if ($format -eq 'odbc') {
-            $length=1;foreach($record in $data.rows){if($null -ne $record[$ci]){$length=[Math]::Max($length,([string]$record[$ci]).Length)}}
+            $length=1
+            if($streaming){$length=[Math]::Max(1,[int]$request.stream.lengths[$ci])}
+            else{foreach($record in $data.rows){if($null -ne $record[$ci]){$length=[Math]::Max($length,([string]$record[$ci]).Length)}}}
             if($length -gt 4000){throw 'ODBC 文本超过 4,000 字符，请改用文件导出'}
             $type='VARCHAR('+$length+')'
             if($connection.Driver -match '(?i)ACEODBC|ODBCJT' -and $length -gt 255){$type='MEMO'}
@@ -138,9 +159,13 @@ try {
         $parameter=$command.CreateParameter();$parameter.DbType=[Data.DbType]::String
         $parameter.Size=32767;[void]$command.Parameters.Add($parameter)
     }
-    foreach ($row in $data.rows) {
+    [long]$written=0
+    InputRows | ForEach-Object {
+        $row=$_
+        if($format -eq 'xls' -and $written -ge 65535){throw 'XLS 格式每张工作表只能容纳 65,535 行数据，请选择可自动分工作表的 XLSX 或 CSV/JSON'}
         for ($i=0; $i -lt $data.columns.Count; $i++) {
             $value=$row[$i]
+            if ($format -eq 'dbf' -and ($null -eq $value -or [Text.Encoding]::Default.GetByteCount([string]$value) -gt 254 -or $value -match '[\x00-\x1F]')) { throw 'DBF 仅导出不含 NULL、控制字符且在系统代码页下不超过 254 字节的值；请使用 XLSX/JSON 保留原值' }
             if($format -eq 'xls'){
                 if($null -eq $value){$value='\N'}
                 elseif($value -ceq ''){$value='\E'}
@@ -150,6 +175,7 @@ try {
             $command.Parameters[$i].Value=$(if ($null -eq $value) {[DBNull]::Value} else {[string]$value})
         }
         [void]$command.ExecuteNonQuery()
+        $written++
     }
     $command.Dispose()
     if ($format -eq 'odbc') { $check=ReadRows ('SELECT * FROM '+$qualified) }
@@ -159,10 +185,21 @@ try {
         if ($match.Count -ne 1) { throw ('驱动未生成可核对的表，停止保存。可见表：'+(($items | ForEach-Object {$_.label}) -join ', ')) }
         $check=ReadRows ('SELECT * FROM '+(Qualified $match[0]))
     }
-    if ($check.rows.Count -ne $data.rows.Count) { throw '驱动导出行数不一致，停止保存' }
-    $expectedRows=@($data.rows | ForEach-Object {ConvertTo-Json -InputObject ([object[]]$_) -Compress -Depth 4} | Sort-Object -CaseSensitive)
-    $actualRows=@($check.rows | ForEach-Object {ConvertTo-Json -InputObject ([object[]]$_) -Compress -Depth 4} | Sort-Object -CaseSensitive)
-    for($i=0;$i -lt $expectedRows.Count;$i++){if($expectedRows[$i] -cne $actualRows[$i]){throw '驱动改变了数据（精度、编码、NULL 或文本），已停止保存，请改用 XLSX/JSON'}}
+    if($check.columns.Count -ne $data.columns.Count){throw '驱动改变了字段数量，停止保存'}
+    for($i=0;$i -lt $data.columns.Count;$i++){
+        $same=$check.columns[$i] -ceq $data.columns[$i]
+        # dBASE stores identifiers in upper case; the driver cannot preserve case.
+        if($format -eq 'dbf'){$same=$check.columns[$i] -ieq $data.columns[$i]}
+        if(-not $same){throw '驱动改变了字段名，停止保存'}
+    }
+    if($streaming){
+        if($written -ne [long]$request.stream.count -or $check.count -ne $written -or $check.digest -cne [string]$request.stream.digest){throw '驱动回读与导出数据不一致（行数、精度、编码或 NULL），停止保存'}
+    }else{
+        if ($check.rows.Count -ne $data.rows.Count) { throw '驱动导出行数不一致，停止保存' }
+        $expectedRows=@($data.rows | ForEach-Object {ConvertTo-Json -InputObject ([object[]]$_) -Compress -Depth 4} | Sort-Object -CaseSensitive)
+        $actualRows=@($check.rows | ForEach-Object {ConvertTo-Json -InputObject ([object[]]$_) -Compress -Depth 4} | Sort-Object -CaseSensitive)
+        for($i=0;$i -lt $expectedRows.Count;$i++){if($expectedRows[$i] -cne $actualRows[$i]){throw '驱动改变了数据（精度、编码、NULL 或文本），已停止保存，请改用 XLSX/JSON'}}
+    }
     if ($transaction) { $transaction.Commit();$transaction.Dispose();$transaction=$null }
     [Console]::Out.Write('{}')
 } catch {

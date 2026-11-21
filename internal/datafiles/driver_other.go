@@ -19,3 +19,6 @@ func driverRead(context.Context, Options) (Data, error) {
 func driverWrite(context.Context, Options, Data) error {
 	return errors.New("该格式需要 Windows 数据驱动")
 }
+func driverWriteStream(context.Context, Options, Source) error {
+	return errors.New("该格式需要 Windows 数据驱动")
+}

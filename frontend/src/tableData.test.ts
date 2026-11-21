@@ -1,9 +1,6 @@
 import {describe,expect,it} from 'vitest'
-import {csvText,generatedSQL,importSQL,parseCSV,quoteIdentifier,suggestedExpression,transferSelectSQL} from './tableData'
+import {csvText,generatedSQL,importSQL,parseCSV,quoteIdentifier,suggestedExpression} from './tableData'
 describe('table data transformations',()=>{
- it('exports bytes and spatial values on the server with quoted identifiers and preserved NULLs',()=>{
-  expect(transferSelectSQL('a`b',[['data`','varbinary(20)'],['flags','bit(64)'],['location','point'],['name','varchar(50)']])).toBe("SELECT CONCAT('0x',HEX(`data```)) AS `data```, CONCAT('0x',HEX(`flags`)) AS `flags`, CONCAT('SRID=',ST_SRID(`location`),';WKB=0x',HEX(ST_AsWKB(`location`))) AS `location`, `name` FROM `a``b` LIMIT 1001")
- })
  it('restores HEX bytes, BIT and WKB/SRID by the mapped target type, keeping empty, NULL and literal text distinct',()=>{
   const types=new Map([['bytes','blob'],['flags','bit(64)'],['place','geometry'],['label','text']])
   const sql=importSQL('t',[['a','b','c','d'],['0x00ff8041','0x0000000000000001','SRID=4326;WKB=0x01010000000000000000003e400000000000003440','0xFF'],['0x',null,null,'SRID=0;WKB=0x']],['bytes','flags','place','label'],false,types)
