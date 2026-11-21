@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue'
 import {Square} from '@lucide/vue'
+import DatabaseEngineIcon from './DatabaseEngineIcon.vue'
 import {api,errorText,type Profile} from './api'
 import {quoteIdentifier} from './tableData'
 import {consoleComplete,consoleResult,consoleUse} from './sqlConsole'
@@ -55,7 +56,7 @@ onMounted(()=>void focus())
 onUnmounted(()=>{disposed=true;if(task)void api.CancelDatabaseTask(task).catch(()=>{})})
 </script>
 <template><section class="sql-console" :aria-label="profile.name+' 命令行界面'" @keydown="keys">
- <div class="sql-console-context"><span>{{profile.name}} / <strong>{{database}}</strong></span><button v-if="running" class="link-button" :disabled="stopping" @click="stop"><Square :size="11"/>{{stopping?'正在停止…':'停止'}}</button></div>
+ <div class="sql-console-context"><span><DatabaseEngineIcon :engine="profile.engine" :size="15" :state="connected?'connected':'disconnected'"/> {{profile.name}} / <strong>{{database}}</strong></span><button v-if="running" class="link-button" :disabled="stopping" @click="stop"><Square :size="11"/>{{stopping?'正在停止…':'停止'}}</button></div>
  <div ref="viewport" class="sql-console-viewport"><p v-if="discarded" class="sql-console-retention">较早输出已移除；历史记录仅保存在当前标签内存中。</p><pre v-for="entry in entries" :key="entry.id" :class="{'sql-console-error':entry.error}" :role="entry.error?'alert':undefined">{{entry.text}}</pre>
   <div class="sql-console-prompt"><label :for="consoleID">mysql&gt;</label><textarea :id="consoleID" ref="editor" v-model="input" :rows="inputRows" :readonly="running||!connected" aria-label="SQL 命令" :aria-busy="running" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"/></div>
   <p v-if="!connected" class="sql-console-offline" role="status">连接已关闭</p>

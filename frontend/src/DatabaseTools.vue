@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import DatabaseEngineIcon from './DatabaseEngineIcon.vue'
 import {vDraggableDialog} from './draggableDialog'
 import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue'
-import {X,Play,Square,FolderOpen,Save,Database,LoaderCircle} from '@lucide/vue'
+import {X,Play,Square,FolderOpen,Save,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminRequest,type AdminResult,type Profile} from './api'
 import {dictionaryHTML,modelSVG} from './databaseReports'
 import {quoteIdentifier} from './tableData'
@@ -49,7 +50,7 @@ onUnmounted(()=>{if(task)void api.CancelDatabaseTask(task)})
 </script>
 <template>
  <div class="db-tools-overlay" @keydown.esc.stop.prevent="close" @keydown.tab="trap"><section v-draggable-dialog ref="windowRef" class="db-tools-window" :class="{'db-tools-compact':['create','alter','drop'].includes(mode),'db-tools-drop':mode==='drop','db-tools-model':mode==='model'}" role="dialog" aria-modal="true" :aria-label="names[mode]">
-  <header><Database :size="16"/><h2>{{names[mode]}} · {{profile.name}}<template v-if="mode!=='create'"> / {{database}}</template></h2><button class="tiny-button" aria-label="关闭数据库工具" @click="close"><X :size="17"/></button></header>
+  <header><DatabaseEngineIcon :engine="profile.engine" :size="16"/><h2>{{names[mode]}} · {{profile.name}}<template v-if="mode!=='create'"> / {{database}}</template></h2><button class="tiny-button" aria-label="关闭数据库工具" @click="close"><X :size="17"/></button></header>
   <TableWorkflows v-if="workflowMode" ref="workflow" :profile="profile" :database="database" :table="table" :mode="workflowMode" @close="emit('close')" @changed="(operation,name)=>emit('changed',operation,name)"/>
   <div v-else class="db-tools-body">
    <template v-if="mode==='create'||mode==='alter'"><p class="db-tools-note">{{mode==='alter'?'修改数据库默认字符集和排序规则，不会重命名数据库或转换已有表的数据。':'创建一个空数据库，权限由当前 MySQL 账户决定。'}}</p><div class="db-schema-form"><label for="schema-name">数据库名</label><input id="schema-name" v-model="name" :disabled="mode==='alter'||running" maxlength="64"/><label for="schema-charset">字符集</label><SearchableSelect label="字符集" id="schema-charset" v-model="charset" :options="charsets" @change="selectCharset" :disabled="running"/><label for="schema-collation">排序规则</label><SearchableSelect label="排序规则" id="schema-collation" v-model="collation" :options="collations" :disabled="running"/></div></template>

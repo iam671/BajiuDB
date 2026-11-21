@@ -18,6 +18,7 @@ function workspace(){
 it.each(databaseEngines)('selects $label before opening its fixed configuration without connecting early',async(engine)=>{
  const calls=workspace();await settle();root.querySelector<HTMLButtonElement>('[aria-label="新建连接"]')!.click();await settle()
  expect(root.querySelector('.connection-type-dialog')).not.toBeNull();expect(root.querySelector('.connection-dialog')).toBeNull();expect(root.querySelectorAll('[aria-labelledby="all-types-title"] [data-engine]')).toHaveLength(8)
+ expect(allCard(engine.value).querySelector('svg')?.getAttribute('data-database-engine')).toBe(engine.value)
  allCard(engine.value).click();await settle()
  expect(root.querySelector('.connection-type-dialog')).toBeNull();expect(root.querySelector('#connection-engine')).toBeNull();expect(root.querySelector('#connection-dialog-title')?.textContent).toContain(engine.label)
  if(engine.value!=='sqlite')expect(root.querySelector<HTMLInputElement>('#connection-port')?.value).toBe(String(engine.port))

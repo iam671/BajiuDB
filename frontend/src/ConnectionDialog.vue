@@ -2,7 +2,8 @@
 import { ref, nextTick, onMounted,computed } from 'vue'
 import {engineOf,engineLabel,mysqlFamily} from './databaseEngines'
 import {api} from './api'
-import { Database, X, LoaderCircle, FolderOpen, Eye, EyeOff, CheckCircle2, AlertCircle } from '@lucide/vue'
+import DatabaseEngineIcon from './DatabaseEngineIcon.vue'
+import { X, LoaderCircle, FolderOpen, Eye, EyeOff, CheckCircle2, AlertCircle } from '@lucide/vue'
 import type { ConnectionInput, TestResult, ConnectionGroup } from './api'
 import { APP_ICON } from './api'
 import {vDraggableDialog} from './draggableDialog'
@@ -33,14 +34,14 @@ onMounted(focusFirst)
 <template>
   <div class="connection-overlay">
     <section v-draggable-dialog class="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connection-dialog-title" @keydown.tab="trap">
-      <header class="dialog-titlebar connection-drag-handle" title="拖动标题栏移动，双击标题栏或 Alt+Home 居中"><Database :size="15" class="mysql-color"/><h2 id="connection-dialog-title">{{engineLabel(model)}} - {{connectOnSave?'打开连接':editing?'编辑连接':'新建连接'}}</h2><button type="button" class="window-close" aria-label="关闭连接窗口" @click="emit('cancel')" :disabled="!!busy"><X :size="16"/></button></header>
+      <header class="dialog-titlebar connection-drag-handle" title="拖动标题栏移动，双击标题栏或 Alt+Home 居中"><DatabaseEngineIcon :engine="model.engine" :size="16"/><h2 id="connection-dialog-title">{{engineLabel(model)}} - {{connectOnSave?'打开连接':editing?'编辑连接':'新建连接'}}</h2><button type="button" class="window-close" aria-label="关闭连接窗口" @click="emit('cancel')" :disabled="!!busy"><X :size="16"/></button></header>
       <form class="dialog-form" @submit.prevent="emit('save')">
         <div class="connection-tabbar" role="tablist" aria-label="连接设置分页" @keydown="tabKey">
           <button v-for="t in tabs" :key="t.id" type="button" role="tab" :id="'connection-tabs-'+t.id" :aria-controls="'connection-panel-'+t.id" :aria-selected="tab===t.id" :tabindex="tab===t.id?0:-1" :class="{active:tab===t.id}" @click="tab=t.id" :disabled="!!busy">{{t.label}}</button>
         </div>
         <fieldset class="dialog-content" :disabled="!!busy||fatal">
           <section v-show="tab==='general'" role="tabpanel" id="connection-panel-general" aria-labelledby="connection-tabs-general">
-            <div class="connection-route" aria-hidden="true"><div><img :src="APP_ICON" alt="" width="39" height="39"/><span>Bajiu DB</span></div><hr/><div><Database :size="35" stroke-width="1.3"/><span>数据库</span></div></div>
+            <div class="connection-route" aria-hidden="true"><div><img :src="APP_ICON" alt="" width="39" height="39"/><span>Bajiu DB</span></div><hr/><div><DatabaseEngineIcon :engine="model.engine" :size="42"/><span>{{engineLabel(model)}}</span></div></div>
             <div class="native-form-row name-row"><label for="connection-name">连接名：</label><div class="native-field"><input id="connection-name" v-model="model.name" maxlength="80" autocomplete="off" :aria-invalid="!!errors.name"/><span v-if="errors.name" class="field-error">{{errors.name}}</span></div></div>
             <div class="native-form-row" v-if="engineOf(model)!=='sqlite'"><label for="connection-host">主机：</label><div class="native-field"><input id="connection-host" v-model="model.host" maxlength="253" spellcheck="false" :aria-invalid="!!errors.host"/><span v-if="errors.host" class="field-error">{{errors.host}}</span></div></div>
             <div class="native-form-row" v-if="engineOf(model)!=='sqlite'"><label for="connection-port">端口：</label><div class="native-field"><input id="connection-port" class="short-input" v-model.number="model.port" type="number" min="1" max="65535" :aria-invalid="!!errors.port"/><span v-if="errors.port" class="field-error">{{errors.port}}</span></div></div>

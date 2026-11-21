@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref,shallowRef,watch} from 'vue'
-import {Play,Square,Plug,Database,LoaderCircle} from '@lucide/vue'
+import {Play,Square,Database,LoaderCircle} from '@lucide/vue'
 import {api,errorText,type AdminResult,type Profile} from './api'
 import TableDataEditor from './TableDataEditor.vue'
+import DatabaseEngineIcon from './DatabaseEngineIcon.vue'
 import {editableQuery,type EditableQuery} from './queryEditing'
 import {mysqlFamily,engineOf} from './databaseEngines'
 import type {CellValueRequest} from './cellValueTools'
@@ -47,7 +48,7 @@ onUnmounted(()=>{disposed=true;if(task)void api.CancelDatabaseTask(task).catch((
  <div class="query-editor-toolbar" role="toolbar" aria-label="查询操作">
   <button class="native-button default-button" :disabled="running||!connected||!sql.trim()" @click="execute"><Play :size="14"/>执行（选中或全部）</button>
   <button class="native-button" :disabled="!running||stopping" @click="cancel"><Square :size="12"/>{{stopping?'正在停止…':'停止'}}</button>
-  <span class="query-editor-target"><Plug :size="13"/>{{profile.name}}<Database :size="13"/>{{database}}</span>
+  <span class="query-editor-target"><DatabaseEngineIcon :engine="profile.engine" :size="15" :state="connected?'connected':'disconnected'"/>{{profile.name}}<Database :size="13"/>{{database}}</span>
  </div>
  <p v-if="!connected" class="query-editor-disconnected" role="status">此查询的连接已关闭。重新打开“{{profile.name}}”后可继续执行，SQL 和已有结果仍保留。</p>
  <div class="query-editor-workspace" :class="{'has-editable-result':!!query}">

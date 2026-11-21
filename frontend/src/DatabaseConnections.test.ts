@@ -14,6 +14,7 @@ it.each(databaseEngines)('opens $label settings with fixed matching defaults and
  const model=reactive(newConnectionFor(engine.value)!),pick=vi.fn(async()=> 'test-only.db');window.go={main:{App:{SelectSQLiteFile:pick} as never}}
  app=createApp(ConnectionDialog,{model,busy:'',errors:{},result:null,error:'',editing:false,connectOnSave:false,fatal:false,groups:[]});app.mount(root);await settle()
   expect(root.querySelector('#connection-engine')).toBeNull();expect(root.querySelector('h2')?.textContent).toContain(engine.label)
+  expect(root.querySelector('.dialog-titlebar svg')?.getAttribute('data-database-engine')).toBe(engine.value);expect(root.querySelector('.connection-route svg')?.getAttribute('data-database-engine')).toBe(engine.value)
   expect(model.engine).toBe(engine.value);expect(model.port).toBe(engine.port);expect(model.username).toBe(engine.user);expect(model.database).toBe(engine.database)
   if(engine.value==='sqlite'){expect(root.querySelector('#connection-host')).toBeNull();root.querySelector<HTMLButtonElement>('[aria-label="选择 SQLite 文件"]')!.click();await settle();expect(model.filePath).toBe('test-only.db')}
   else expect(root.querySelector('#connection-host')).not.toBeNull()
@@ -25,7 +26,7 @@ it.each(['sqlite','postgresql','sqlserver','oracle','redis','mongodb'])('browses
  window.go={main:{App:{ListConnections:vi.fn(async()=>[{...defaults(),engine,id:'qa',name:'QA'}]),ListGroups:vi.fn(async()=>[]),ListSessions:vi.fn(async()=>[{id:'qa',databases:['test'],connected:true}]),ConfigPath:vi.fn(async()=>''),ListObjects:vi.fn(async()=>({objects:[{name:'items',kind:'tables',query}],truncated:false})),DatabaseAdmin:execute} as never}}
  app=createApp(Workspace);app.mount(root);await settle();root.querySelector('.tree-connection')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();root.querySelector('.tree-database')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle()
  root.querySelector('.object-table tbody tr')!.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));await settle();expect(root.querySelector('.connection-context-menu')?.textContent).not.toContain('设计表')
- root.querySelector('.object-table tbody tr')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();expect(root.querySelector<HTMLTextAreaElement>('[aria-label="SQL 编辑器"]')?.value).toBe(query);expect(root.querySelector('.table-data-editor')).toBeNull()
+ root.querySelector('.object-table tbody tr')!.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));await settle();expect(root.querySelector<HTMLTextAreaElement>('[aria-label="SQL 编辑器"]')?.value).toBe(query);expect(root.querySelector('.table-data-editor')).toBeNull();expect(root.querySelector('.query-editor-target svg')?.getAttribute('data-database-engine')).toBe(engine)
  button('执行（选中或全部）').click();await settle();expect(execute).toHaveBeenCalledWith(expect.any(String),'qa','test',{operation:'query',sql:query});expect(root.querySelector('.query-editable-result')).toBeNull()
 })
 it('keeps a PostgreSQL SELECT on the raw-query route without probing MySQL metadata',async()=>{
